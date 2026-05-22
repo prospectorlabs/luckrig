@@ -4,6 +4,7 @@ import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { issueTastingToken } from '../shared/token.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +18,8 @@ const METRICS_PATH = path.resolve(ROOT, process.env.LUCKRIG_METRICS_PATH ?? 'dat
 const HEALTH_INTERVAL_MS = Number.parseInt(process.env.LUCKRIG_HEALTH_INTERVAL_MS ?? '30000', 10);
 const HEALTH_TIMEOUT_MS = Number.parseInt(process.env.LUCKRIG_HEALTH_TIMEOUT_MS ?? '2000', 10);
 const DEV_WRITES_ENABLED = process.env.LUCKRIG_DEV === '1';
+const TRACKER_SECRET = process.env.LUCKRIG_TRACKER_SECRET ?? 'luckrig-dev-secret-change-me';
+const FULL_ACCESS_SCORE_THRESHOLD = Number.parseInt(process.env.LUCKRIG_FULL_ACCESS_SCORE_THRESHOLD ?? '1', 10);
 
 /** @type {Map<string, import('./types.js').NodeRecord>} */
 const nodes = new Map();
@@ -291,6 +294,20 @@ function listMetricsSummaries() {
   return [...nodes.keys()].map((nodeId) => getMetricsSummary(nodeId));
 }
 
+function contributionStatus({ userId = 'anonymous', contributionScore = 0 } = {}) {
+  const score = asOptionalNumber(contributionScore, 0) ?? 0;
+  const tier = score >= FULL_ACCESS_SCORE_THRESHOLD ? 'contributor' : 'limited';
+  return {
+    user_id: userId,
+    contribution_score: score,
+    full_access_threshold: FULL_ACCESS_SCORE_THRESHOLD,
+    tier,
+    access: tier === 'contributor'
+      ? { mode: 'full', description: 'POC contributor token: all listed models may be requested.' }
+      : { mode: 'limited', description: 'POC limited token: tasting access only. Production will enforce stricter quota/output limits.' },
+  };
+}
+
 function normalizeNode(input, existing = undefined) {
   const modelName = asOptionalString(input.model_name ?? input.modelName);
   const gpu = asOptionalString(input.gpu);
@@ -532,6 +549,7 @@ async function handleApi(req, res, url) {
       health_interval_ms: HEALTH_INTERVAL_MS,
       health_timeout_ms: HEALTH_TIMEOUT_MS,
       dev_writes_enabled: DEV_WRITES_ENABLED,
+      full_access_score_threshold: FULL_ACCESS_SCORE_THRESHOLD,
       now: nowIso(),
     }, corsHeaders());
     return;
@@ -554,6 +572,44 @@ async function handleApi(req, res, url) {
       metrics_path: METRICS_PATH,
       summaries: listMetricsSummaries(),
     }, corsHeaders());
+    return;
+  }
+
+  if (url.pathname === '/api/tokens' && req.method === 'POST') {
+    const body = await readJsonBody(req);
+    const nodeId = asOptionalString(body.node_id ?? body.nodeId);
+    if (!nodeId || !nodes.has(nodeId)) {
+      json(res, 404, { error: 'node not found' }, corsHeaders());
+      return;
+    }
+    const status = contributionStatus({
+      userId: asOptionalString(body.user_id ?? body.userId, 'anonymous'),
+      contributionScore: body.contribution_score ?? body.contributionScore ?? 0,
+    });
+    const issued = issueTastingToken({
+      secret: TRACKER_SECRET,
+      nodeId,
+      userId: status.user_id,
+      tier: status.tier,
+      ttlSec: asOptionalInteger(body.ttl_sec ?? body.ttlSec, 15 * 60),
+    });
+    json(res, 201, {
+      schema_version: 1,
+      token_type: 'Bearer',
+      token: issued.token,
+      expires_at: issued.expires_at,
+      session_secret: issued.payload.session_secret,
+      contribution: status,
+      node: publicNode(nodes.get(nodeId), computeRarityScores().get(nodeId) ?? 0),
+      caveat: 'POC token carries a session secret for local E2E testing. Production should replace this with the CONCEPT public-key handoff.',
+    }, corsHeaders());
+    return;
+  }
+
+  const contributionMatch = url.pathname.match(/^\/api\/contribution\/([^/]+)$/);
+  if (contributionMatch && req.method === 'GET') {
+    const score = url.searchParams.get('score') ?? '0';
+    json(res, 200, { schema_version: 1, contribution: contributionStatus({ userId: contributionMatch[1], contributionScore: score }) }, corsHeaders());
     return;
   }
 
@@ -654,6 +710,7 @@ async function main() {
 export {
   METRICS_PATH,
   REGISTRY_PATH,
+  contributionStatus,
   handleRequest,
   listMetricsSummaries,
   listPublicNodes,

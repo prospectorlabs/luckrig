@@ -1,14 +1,13 @@
 # Tracker API prototype
 
-Step 1の目的は、CONCEPT.md §「最小実装の順序」に従い、まず **無登録者向けの公開リスト + 死活監視** を立ち上げることです。
+このAPIは、CONCEPT.md §「最小実装の順序」に沿ったPOC trackerです。無登録者向け公開リスト、死活監視、health/telemetry履歴、POC token発行までを担当します。
 
 この段階では以下をまだ実装しません：
 
 - tok/s / TTFT の本計測（Step 2以降。tok/sは利用者側リプレイデータを一次ソースにする）
-- ノード登録CLI（Step 3）
-- トークン発行（Step 4）
-- キューUX / 擬似SSE / subtext（Step 5以降）
-- 貢献スコア / 権限管理（Step 7）
+- production-grade公開鍵ハンドオフ付きトークン発行（Step 4）
+- production UIでのキューUX操作（Step 5）
+- production-grade貢献スコア / 権限管理（Step 7）
 
 ## 起動
 
@@ -107,6 +106,25 @@ health probeのJSONLを集約したサマリ。詳細schemaは [`metrics-schema.
 ### `GET /api/metrics/:id`
 
 1ノード分のmetrics summary。
+
+### `POST /api/tokens`
+
+POC用の試食token発行。body:
+
+```json
+{
+  "node_id": "first-5090-qwen3",
+  "user_id": "alice",
+  "contribution_score": 1,
+  "ttl_sec": 900
+}
+```
+
+レスポンスはBearer token、期限、POC用session secret、contribution tierを含みます。productionではCONCEPT.mdの公開鍵ハンドオフへ差し替える前提です。
+
+### `GET /api/contribution/:user_id?score=1`
+
+POC用の貢献tier判定。`score >= LUCKRIG_FULL_ACCESS_SCORE_THRESHOLD` なら `contributor`。
 
 ## Dev-only endpoints
 
