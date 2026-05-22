@@ -47,6 +47,9 @@ async function main() {
   if (!html.includes('node public key fingerprint')) {
     throw new Error('index page did not include fingerprint UI marker');
   }
+  if (!html.includes('browser POC') || !html.includes('tasting-trust')) {
+    throw new Error('index page did not include browser tasting/trust UI markers');
+  }
 
   console.log('[smoke] ok');
   console.log(`[smoke] registry=${tracker.REGISTRY_PATH}`);

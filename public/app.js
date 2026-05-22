@@ -45,6 +45,193 @@ async function copyText(text) {
   return ok;
 }
 
+function base64urlEncode(bytes) {
+  const binary = [...new Uint8Array(bytes)].map((byte) => String.fromCharCode(byte)).join('');
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function base64urlDecode(value) {
+  const padded = String(value).replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(String(value).length / 4) * 4, '=');
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function utf8Encode(value) {
+  return new TextEncoder().encode(value);
+}
+
+function utf8Decode(value) {
+  return new TextDecoder().decode(value);
+}
+
+async function importAesKey(sessionSecret) {
+  const keyBytes = base64urlDecode(sessionSecret);
+  if (keyBytes.byteLength !== 32) throw new Error('session secret must decode to 32 bytes');
+  return crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['encrypt', 'decrypt']);
+}
+
+async function encryptJsonToSubtextBrowser(value, { sessionSecret, coverText = 'luckrig prompt payload' } = {}) {
+  const key = await importAesKey(sessionSecret);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, utf8Encode(JSON.stringify(value))));
+  const ciphertext = encrypted.slice(0, -16);
+  const tag = encrypted.slice(-16);
+  const envelope = {
+    v: 1,
+    alg: 'AES-256-GCM',
+    iv: base64urlEncode(iv),
+    tag: base64urlEncode(tag),
+    ciphertext: base64urlEncode(ciphertext),
+  };
+  return bytesToSubtextBrowser(utf8Encode(JSON.stringify(envelope)), coverText);
+}
+
+async function decryptJsonFromSubtextBrowser(text, { sessionSecret } = {}) {
+  const envelopeBytes = subtextToBytesBrowser(text);
+  if (envelopeBytes.byteLength === 0) throw new Error('subtext payload not found');
+  const envelope = JSON.parse(utf8Decode(envelopeBytes));
+  if (envelope.v !== 1 || envelope.alg !== 'AES-256-GCM') throw new Error('unsupported encrypted envelope');
+  const key = await importAesKey(sessionSecret);
+  const ciphertext = base64urlDecode(envelope.ciphertext);
+  const tag = base64urlDecode(envelope.tag);
+  const combined = new Uint8Array(ciphertext.byteLength + tag.byteLength);
+  combined.set(ciphertext, 0);
+  combined.set(tag, ciphertext.byteLength);
+  const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64urlDecode(envelope.iv) }, key, combined);
+  return JSON.parse(utf8Decode(new Uint8Array(plaintext)));
+}
+
+function bytesToSubtextBrowser(bytes, coverText = 'luckrig tasting payload') {
+  const hidden = [...new Uint8Array(bytes)].flatMap((byte) => [byte >> 4, byte & 0x0f])
+    .map((nibble) => String.fromCodePoint(0xfe00 + nibble))
+    .join('');
+  return `${coverText}${hidden}`;
+}
+
+function subtextToBytesBrowser(text) {
+  const nibbles = [];
+  for (const char of String(text ?? '')) {
+    const code = char.codePointAt(0);
+    if (code >= 0xfe00 && code <= 0xfe0f) nibbles.push(code - 0xfe00);
+  }
+  if (nibbles.length === 0) return new Uint8Array(0);
+  if (nibbles.length % 2 !== 0) throw new Error('invalid subtext nibble length');
+  const bytes = new Uint8Array(nibbles.length / 2);
+  for (let i = 0; i < nibbles.length; i += 2) bytes[i / 2] = (nibbles[i] << 4) | nibbles[i + 1];
+  return bytes;
+}
+
+function parseSseText(text) {
+  const events = [];
+  let encryptedContent = '';
+  const chunk_timestamps = [];
+  for (const line of String(text).split(/\r?\n/)) {
+    if (!line.startsWith('data: ')) continue;
+    const data = line.slice('data: '.length).trim();
+    if (!data || data === '[DONE]') continue;
+    const parsed = JSON.parse(data);
+    events.push(parsed);
+    const content = parsed?.choices?.[0]?.delta?.content;
+    if (typeof content === 'string') {
+      encryptedContent += content;
+      chunk_timestamps.push(Date.now());
+    }
+  }
+  return { events, encryptedContent, chunk_timestamps };
+}
+
+function estimateTokens(text) {
+  const value = String(text ?? '').trim();
+  return value ? Math.max(1, Math.ceil(value.length / 4)) : 0;
+}
+
+function buildReplayRecordBrowser(envelope, { chunk_timestamps = [], ttft_ms = null } = {}) {
+  const outputTokens = estimateTokens(envelope.response);
+  const tokPerSec = envelope.generation_sec > 0 ? Number((outputTokens / envelope.generation_sec).toFixed(3)) : null;
+  return {
+    schema_version: 1,
+    created_at: new Date().toISOString(),
+    prompt: envelope.prompt?.prompt ?? envelope.prompt,
+    response: envelope.response,
+    node_id: envelope.node_id,
+    queue_wait_sec: envelope.queue_wait_sec ?? 0,
+    generation_sec: envelope.generation_sec ?? 0,
+    tok_per_sec: tokPerSec,
+    ttft_ms,
+    chunk_timestamps,
+    limited_output_truncated: envelope.limited_output_truncated ?? false,
+  };
+}
+
+function replayFilename(record) {
+  const stamp = new Date(record.created_at).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  const node = String(record.node_id ?? 'unknown').replace(/[^a-zA-Z0-9_.-]+/g, '-');
+  return `${stamp}_${node}.json`;
+}
+
+async function runBrowserTasting(node, fragment) {
+  const status = fragment.querySelector('.tasting-status');
+  const output = fragment.querySelector('.tasting-output');
+  const download = fragment.querySelector('.replay-download');
+  const trust = fragment.querySelector('.tasting-trust');
+  const prompt = fragment.querySelector('.tasting-prompt').value.trim();
+  const proxyUrl = fragment.querySelector('.tasting-proxy-url').value.trim().replace(/\/$/, '');
+  const userId = fragment.querySelector('.tasting-user-id').value.trim() || 'browser-poc';
+  const contributionScore = Number(fragment.querySelector('.tasting-score').value || 0);
+
+  output.hidden = true;
+  download.hidden = true;
+  if (!trust.checked) throw new Error('trust model checkbox is required');
+  if (!prompt) throw new Error('prompt is required');
+  if (!proxyUrl) throw new Error('proxy URL is required');
+
+  status.textContent = 'requesting token...';
+  const tokenRes = await fetch('/api/tokens', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ node_id: node.id, user_id: userId, contribution_score: contributionScore, ttl_sec: 300 }),
+  });
+  const tokenPayload = await tokenRes.json();
+  if (!tokenRes.ok) throw new Error(tokenPayload.error ?? `token HTTP ${tokenRes.status}`);
+  if (!tokenPayload.session_secret) throw new Error('browser POC currently expects legacy session-secret token mode');
+
+  status.textContent = 'encrypting prompt...';
+  const encryptedPrompt = await encryptJsonToSubtextBrowser({ prompt }, { sessionSecret: tokenPayload.session_secret });
+  const chatBody = {
+    model: node.model_name || 'luckrig-browser-poc',
+    stream: true,
+    messages: [{ role: 'user', content: encryptedPrompt }],
+  };
+
+  status.textContent = 'waiting for proxy / pseudo SSE...';
+  const started = performance.now();
+  const proxyRes = await fetch(`${proxyUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${tokenPayload.token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(chatBody),
+  });
+  const sseText = await proxyRes.text();
+  if (!proxyRes.ok) throw new Error(sseText || `proxy HTTP ${proxyRes.status}`);
+
+  status.textContent = 'decrypting response...';
+  const { encryptedContent, chunk_timestamps } = parseSseText(sseText);
+  const envelope = await decryptJsonFromSubtextBrowser(encryptedContent, { sessionSecret: tokenPayload.session_secret });
+  const replay = buildReplayRecordBrowser(envelope, { chunk_timestamps, ttft_ms: Math.round(performance.now() - started) });
+
+  output.hidden = false;
+  output.textContent = replay.response;
+  const blob = new Blob([`${JSON.stringify(replay, null, 2)}\n`], { type: 'application/json' });
+  if (download.href) URL.revokeObjectURL(download.href);
+  download.href = URL.createObjectURL(blob);
+  download.download = replayFilename(replay);
+  download.hidden = false;
+  download.textContent = `download replay JSON (${download.download})`;
+  status.textContent = `done: ${replay.tok_per_sec ?? '—'} tok/s, truncated=${replay.limited_output_truncated}`;
+}
+
 function renderSummary(nodes) {
   const counts = nodes.reduce((acc, node) => {
     acc[node.health.status] = (acc[node.health.status] ?? 0) + 1;
@@ -136,6 +323,21 @@ function renderNode(node) {
     <span>memory: ${memoryLabel}</span>
     <span>gpu util: ${gpuLabel}</span>
   `;
+
+  fragment.querySelector('.tasting-proxy-url').value = node.endpoint_url ?? '';
+  const runButton = fragment.querySelector('.run-tasting');
+  const tastingStatus = fragment.querySelector('.tasting-status');
+  runButton.addEventListener('click', async () => {
+    runButton.disabled = true;
+    tastingStatus.textContent = 'starting...';
+    try {
+      await runBrowserTasting(node, fragment);
+    } catch (error) {
+      tastingStatus.textContent = `error: ${error.message}`;
+    } finally {
+      runButton.disabled = false;
+    }
+  });
 
   return fragment;
 }

@@ -146,12 +146,25 @@ npm test
 - replay record作成・保存・読み戻し
 - invalid token拒否
 
+## Browser tasting POC
+
+Public UIの各ノードカードには `試食する / browser POC` パネルがあります。現時点のブラウザ実装は、WebCrypto互換性を優先してlegacy `session-secret` token modeを使います。流れは以下です。
+
+1. trust checkboxを確認
+2. `POST /api/tokens` で短命tokenを取得
+3. browser WebCrypto AES-GCMでpromptをsubtext化
+4. node proxyへOpenAI互換リクエスト
+5. pseudo SSEを復号
+6. replay JSONをdownload
+
+Node/CLI E2Eではpublic-key modeを検証済みです。ブラウザのproduction public-key flowはfingerprint確認UXと合わせて後続です。
+
 ## まだPOC外のこと
 
 - production-grade公開鍵フィンガープリント検証 / 鍵すり替え対策
 - 永続DB
-- 本物のquota enforcement
+- durable quota enforcement（POCはlimited出力truncateのみ）
 - NSFW filter
 - 実tokenizerによるtok/s算出
-- 本番UIでの試食操作
+- production public-key browser tasting（現ブラウザPOCはlegacy session-secret mode）
 - contribution scoreの本採点

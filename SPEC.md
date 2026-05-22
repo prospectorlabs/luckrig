@@ -231,7 +231,8 @@ Default local history path:
 | `LUCKRIG_NODE_ID` | `local-poc-node` | Node ID expected in tasting token |
 | `LUCKRIG_TRACKER_SECRET` | dev default | HMAC secret shared with tracker in POC |
 | `LUCKRIG_UPSTREAM_URL` | unset | OpenAI-compatible upstream base URL. If unset, proxy uses mock generation |
-| `LUCKRIG_NODE_PRIVATE_KEY` | unset | PEM X25519 private key used to decrypt public-key subtext prompts |
+| `LUCKRIG_NODE_PRIVATE_KEY` | unset | PEM private key used to decrypt public-key subtext prompts |
+| `LUCKRIG_LIMITED_OUTPUT_CHARS` | `240` | POC truncation length for limited-tier output |
 
 ---
 
@@ -530,7 +531,8 @@ Behavior:
 5. Forward prompt to upstream or mock generator.
 6. Buffer complete response.
 7. Encrypt response envelope.
-8. Return pseudo SSE chunks when `stream: true`.
+8. Apply limited-tier truncation when token tier is `limited`.
+9. Return pseudo SSE chunks when `stream: true`.
 
 ---
 

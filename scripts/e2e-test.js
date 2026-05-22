@@ -164,6 +164,27 @@ async function main() {
   const legacyEncrypted = encryptJsonToSubtext({ ok: true }, { sessionSecret: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' });
   assert.deepEqual(decryptJsonFromSubtext(legacyEncrypted, { sessionSecret: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }), { ok: true });
 
+  const limitedTokenResponse = await requestTracker({
+    method: 'POST',
+    url: '/api/tokens',
+    headers: { 'content-type': 'application/json' },
+    body: { node_id: node.id, user_id: 'limited-e2e', contribution_score: 0, ttl_sec: 60 },
+  });
+  assert.equal(limitedTokenResponse.statusCode, 201, limitedTokenResponse.text);
+  assert.equal(limitedTokenResponse.json.contribution.tier, 'limited');
+  assert.equal(limitedTokenResponse.json.crypto_mode, 'session-secret');
+  const limitedPrompt = 'x'.repeat(1200);
+  const limitedBody = buildEncryptedChatBody({ prompt: limitedPrompt, sessionSecret: limitedTokenResponse.json.session_secret, stream: true });
+  const limitedProxyResult = await processChatCompletion({
+    body: limitedBody,
+    authHeader: `Bearer ${limitedTokenResponse.json.token}`,
+    nodeId: node.id,
+    trackerSecret: process.env.LUCKRIG_TRACKER_SECRET,
+  });
+  const limitedReplay = replayFromProxyResult(limitedProxyResult, { sessionSecret: limitedTokenResponse.json.session_secret, ttft_ms: 0 });
+  assert.equal(limitedReplay.limited_output_truncated, true);
+  assert.match(limitedReplay.response, /limited tasting output truncated/);
+
   await assert.rejects(
     () => processChatCompletion({ body, authHeader: 'Bearer broken', nodeId: node.id, trackerSecret: process.env.LUCKRIG_TRACKER_SECRET, nodePrivateKey: nodeKeys.privateKeyPem }),
     /invalid token format|invalid token signature/,

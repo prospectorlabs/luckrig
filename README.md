@@ -62,7 +62,7 @@ npm test
 - metrics schema: [`docs/metrics-schema.md`](./docs/metrics-schema.md)
 - POC E2E: [`docs/poc.md`](./docs/poc.md)
 
-現段階ではproduction-grade DB、公開鍵フィンガープリント検証、本物のquota、NSFW filterは未実装です。POCとして、公開リスト、fingerprint表示、死活監視、health/telemetry履歴、POC token、node proxy、subtext、擬似SSE、replay保存までを一通りつないでいます。
+現段階ではproduction-grade DB、公開鍵フィンガープリント検証、本物のquota、NSFW filterは未実装です。POCとして、公開リスト、fingerprint表示、ブラウザ試食POC、trust checkbox、死活監視、health/telemetry履歴、POC token、node proxy、subtext、擬似SSE、replay保存までを一通りつないでいます。
 
 ## Status
 

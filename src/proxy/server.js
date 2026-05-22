@@ -18,8 +18,17 @@ const TRACKER_SECRET = process.env.LUCKRIG_TRACKER_SECRET ?? 'luckrig-dev-secret
 const UPSTREAM_URL = process.env.LUCKRIG_UPSTREAM_URL ?? '';
 const NODE_PRIVATE_KEY = process.env.LUCKRIG_NODE_PRIVATE_KEY ?? '';
 
+function corsHeaders(extra = {}) {
+  return {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET,POST,OPTIONS',
+    'access-control-allow-headers': 'content-type,authorization',
+    ...extra,
+  };
+}
+
 function json(res, statusCode, body) {
-  res.writeHead(statusCode, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  res.writeHead(statusCode, corsHeaders({ 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }));
   res.end(JSON.stringify(body, null, 2));
 }
 
@@ -83,6 +92,18 @@ async function callUpstream({ body, prompt, upstreamUrl = UPSTREAM_URL, fetchImp
   };
 }
 
+function applyTierPolicy(text, tokenPayload) {
+  if (tokenPayload?.tier !== 'limited') return { text, limited: false };
+  const limit = Number.parseInt(process.env.LUCKRIG_LIMITED_OUTPUT_CHARS ?? '240', 10);
+  if (!Number.isFinite(limit) || limit <= 0 || String(text).length <= limit) return { text, limited: false };
+  return {
+    text: `${String(text).slice(0, limit)}
+
+[limited tasting output truncated]`,
+    limited: true,
+  };
+}
+
 function buildPseudoSseChunks(encryptedResponseText, { created = Math.floor(Date.now() / 1000), model = 'luckrig-proxy' } = {}) {
   const id = `chatcmpl-luckrig-${created}`;
   return [
@@ -117,6 +138,7 @@ export async function processChatCompletion({
   // POC queue UX: buffer upstream response fully, then emit pseudo SSE in one pass.
   const generationStartedAt = performance.now();
   const upstream = await callUpstream({ body, prompt, upstreamUrl, fetchImpl });
+  const tiered = applyTierPolicy(upstream.text, tokenPayload);
   const generationSec = (performance.now() - generationStartedAt) / 1000;
   const queueWaitSec = (generationStartedAt - queuedAt) / 1000;
 
@@ -124,7 +146,8 @@ export async function processChatCompletion({
     schema_version: 1,
     node_id: nodeId,
     prompt,
-    response: upstream.text,
+    response: tiered.text,
+    limited_output_truncated: tiered.limited,
     queue_wait_sec: Number(queueWaitSec.toFixed(3)),
     generation_sec: Number(generationSec.toFixed(3)),
     upstream: upstream.upstream,
@@ -169,6 +192,11 @@ export async function processChatCompletion({
 export async function handleProxyRequest(req, res, options = {}) {
   try {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? `${HOST}:${PORT}`}`);
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, corsHeaders());
+      res.end();
+      return;
+    }
     if (req.method === 'GET' && url.pathname === '/health') {
       json(res, 200, {
         ok: true,
@@ -189,11 +217,11 @@ export async function handleProxyRequest(req, res, options = {}) {
         ...options,
       });
       if (result.kind === 'sse') {
-        res.writeHead(result.status, {
+        res.writeHead(result.status, corsHeaders({
           'content-type': 'text/event-stream; charset=utf-8',
           'cache-control': 'no-store',
           connection: 'keep-alive',
-        });
+        }));
         for (const chunk of result.chunks) res.write(chunk);
         res.end();
       } else {

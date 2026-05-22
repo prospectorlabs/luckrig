@@ -408,7 +408,8 @@ Current evidence:
 
 - `processChatCompletion()`
 - `buildPseudoSseChunks()`
-- Browser queue UI is pending
+- Browser tasting panel requests a token, encrypts prompt, calls proxy, decrypts pseudo SSE, and offers replay JSON download
+- Browser POC currently uses legacy session-secret mode; production public-key browser mode remains pending
 
 #### US-6.2 — Preserve OpenAI-compatible shape
 
@@ -514,7 +515,8 @@ Current evidence:
 
 - `CONCEPT.md` §免責の設計
 - README / SPEC docs
-- Full UI gate pending
+- Public UI trust notice
+- Browser tasting checkbox gate
 
 #### US-9.2 — Keep NSFW and heavy creative use out of scope
 
@@ -582,7 +584,8 @@ Acceptance criteria:
 Current evidence:
 
 - Tier label implemented
-- Real enforcement pending
+- Proxy truncates limited-tier output using `LUCKRIG_LIMITED_OUTPUT_CHARS`
+- Durable quota across repeated token requests remains pending
 
 ---
 
@@ -675,14 +678,16 @@ Success indicators:
 - US-8.1 Initial Showcase visibility
 - US-8.2 Tuning notes in node list
 - US-10.1 Public key fingerprint display/copy in UI
+- Browser tasting flow for Journey C using legacy session-secret browser POC mode
+- US-9.1 Trust/disclaimer checkbox gate in browser tasting panel
+- US-10.3 Basic limited-tier output truncation in proxy
 
 ### Next recommended stories
 
-1. **Browser tasting flow for Journey C**
-2. **US-9.1 UI trust/disclaimer gate**
-3. **US-10.3 Real quota enforcement**
-4. **US-9.2 Prompt filtering**
-5. **US-10.2 Durable DB migration**
+1. **US-9.2 Prompt filtering**
+2. **US-10.2 Durable DB migration**
+3. **Production public-key browser tasting (WebCrypto compatible key flow)**
+4. **Full affirmative fingerprint verification gate before tasting**
 
 ---
 

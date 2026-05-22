@@ -137,3 +137,86 @@ dd { margin: 4px 0 0; font-weight: 650; overflow-wrap: anywhere; }
   color: var(--muted);
   font-size: 12px;
 }
+.tasting-panel {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(0,0,0,.16);
+}
+.tasting-panel summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 700;
+}
+.tasting-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+.tasting-grid label, .prompt-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.tasting-grid label:first-child { grid-column: 1 / -1; }
+.tasting-panel input, .tasting-panel textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255,255,255,.045);
+  color: var(--text);
+  padding: 9px 10px;
+  font: inherit;
+}
+.prompt-label { margin-top: 10px; }
+.tasting-panel textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+.trust-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.trust-check input { width: auto; margin-top: 3px; }
+.tasting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+.run-tasting { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.tasting-status {
+  color: var(--muted);
+  font-size: 12px;
+}
+.tasting-output {
+  margin: 12px 0 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(0,0,0,.3);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 320px;
+  overflow: auto;
+}
+.replay-download {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--accent);
+  font-size: 12px;
+}
+@media (max-width: 720px) {
+  .tasting-grid { grid-template-columns: 1fr; }
+}

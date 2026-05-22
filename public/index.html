@@ -65,6 +65,37 @@
             <span class="fingerprint-help"></span>
           </div>
         </section>
+        <details class="tasting-panel">
+          <summary>試食する / browser POC</summary>
+          <div class="tasting-grid">
+            <label>
+              <span>proxy URL</span>
+              <input class="tasting-proxy-url" type="url" />
+            </label>
+            <label>
+              <span>user id</span>
+              <input class="tasting-user-id" type="text" value="browser-poc" />
+            </label>
+            <label>
+              <span>contribution score</span>
+              <input class="tasting-score" type="number" min="0" step="1" value="0" />
+            </label>
+          </div>
+          <label class="prompt-label">
+            <span>prompt</span>
+            <textarea class="tasting-prompt" rows="4" placeholder="このノードで試したい短いプロンプト"></textarea>
+          </label>
+          <label class="trust-check">
+            <input class="tasting-trust" type="checkbox" />
+            <span>trust modelを理解しました。ノード提供者がプロセス内部に踏み込めば平文を見られること、fingerprintは別経路で確認すべきことを了承します。</span>
+          </label>
+          <div class="tasting-actions">
+            <button class="run-tasting" type="button">token取得 → 暗号化 → 試食</button>
+            <span class="tasting-status"></span>
+          </div>
+          <pre class="tasting-output" hidden></pre>
+          <a class="replay-download" hidden download>download replay JSON</a>
+        </details>
         <footer class="health"></footer>
         <footer class="observations"></footer>
       </article>

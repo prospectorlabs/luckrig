@@ -54,6 +54,7 @@ export function buildReplayRecord({
   ttft_ms = null,
   chunk_timestamps = [],
   created_at = new Date().toISOString(),
+  limited_output_truncated = false,
 } = {}) {
   const outputTokens = estimateTokens(response);
   const tokPerSec = generation_sec > 0 ? Number((outputTokens / generation_sec).toFixed(3)) : null;
@@ -68,6 +69,7 @@ export function buildReplayRecord({
     tok_per_sec: tokPerSec,
     ttft_ms,
     chunk_timestamps,
+    limited_output_truncated,
   };
 }
 
@@ -84,6 +86,7 @@ export function replayFromEncryptedSseChunks(chunks, { sessionSecret, userPrivat
     generation_sec: envelope.generation_sec,
     ttft_ms,
     chunk_timestamps,
+    limited_output_truncated: envelope.limited_output_truncated ?? false,
   });
 }
 
