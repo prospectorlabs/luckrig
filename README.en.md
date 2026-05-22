@@ -81,7 +81,7 @@ From CONCEPT.md §"Minimum implementation order":
 
 A dependency-free **POC prototype** is implemented. tracker / token / proxy / subtext / pseudo SSE / replay can be verified end-to-end.
 
-![Public list UI (prototype) — summary, environment comparison table, rarity-ordered node cards](./assets/prototype.png)
+![Public list UI (prototype) — summary, environment comparison table, rarity-ordered node cards](./assets/prototype.en.png)
 
 > The shot above is the public list UI loaded with the three seed nodes (RTX 5090 / Apple M3 Max / Raspberry Pi 5). The default order is by rarity score — a Showcase, not a leaderboard.
 
