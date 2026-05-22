@@ -32,9 +32,9 @@
   <!-- Notice -->
   <g transform="translate(80,272)">
     <rect width="1120" height="76" rx="18" fill="#0f1320" stroke="#5a4a1f"/>
-    <text x="20" y="30" fill="#f5f7fb" font-size="14" font-weight="700">trust model:</text>
-    <text x="118" y="30" fill="#a3a9b8" font-size="14">luckrigは「頑張らなければ見えない」ための実験的な設計です。</text>
-    <text x="20" y="54" fill="#a3a9b8" font-size="14">通常のログやtcpdumpに平文を残さないことを目指しますが、ノード提供者がプロセス内部に踏み込めばプロンプト/出力を見られます。</text>
+    <text x="20" y="30" fill="#f5f7fb" font-size="14" font-weight="700">送信内容について:</text>
+    <text x="150" y="30" fill="#a3a9b8" font-size="14">通常の通信観測や素朴なログにプロンプト/出力がそのまま残らないよう処理します。</text>
+    <text x="20" y="54" fill="#a3a9b8" font-size="14">ただしノード提供者がプロセス内部に踏み込めば平文を見られます。機密情報は送らないでください。</text>
   </g>
 
   <!-- Summary -->

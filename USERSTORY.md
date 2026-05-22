@@ -107,8 +107,8 @@ Goals:
 | E6 | Queue UX / pseudo SSE | Implemented in proxy and browser tasting POC |
 | E7 | Local replay | Implemented, including browser replay JSON download |
 | E8 | Showcase and diversity | Auto Showcase categories, rarity visibility, environment filters, and comparison table implemented |
-| E9 | Trust, disclaimers, and safety | Trust notice, fingerprint confirmation, and prompt filter implemented |
-| E10 | Hardening | SQLite persistence, token quota, prompt filter, fingerprint gate implemented; optional hardening remains |
+| E9 | Trust, disclaimers, and safety | Privacy caveat notice, optional fingerprint self-check, and prompt filter implemented |
+| E10 | Hardening | SQLite persistence, token quota, prompt filter, optional fingerprint self-check implemented; optional hardening remains |
 
 ---
 
@@ -374,14 +374,14 @@ Current evidence:
 
 #### US-5.3 — Understand trust limits
 
-As a **Taster**, I want the UI/docs to clearly state privacy limits, so that I do not mistake luckrig for malicious-node-proof E2E encryption.
+As a **Taster**, I want the UI/docs to clearly state privacy limits without making encryption the main product promise, so that I do not send secrets or mistake luckrig for malicious-node-proof E2E encryption.
 
 Acceptance criteria:
 
 - Docs state node operator can inspect process internals.
 - Docs state tracker + node can collude via key substitution.
 - Public key fingerprints are exposed.
-- UI now requires fingerprint confirmation before browser tasting; alternate trust channels remain future hardening.
+- UI requires a privacy caveat checkbox before browser tasting and offers fingerprint confirmation / URL verification as optional self-checks.
 
 Current evidence:
 
@@ -539,21 +539,21 @@ Current evidence:
 
 #### US-10.1 — Verify public key fingerprints
 
-As a **Taster**, I want to compare the node public key fingerprint against an alternate channel, so that tracker/node key substitution is harder.
+As a **Taster**, I want an optional way to compare the node public key fingerprint against an alternate channel, so that tracker/node key substitution is harder when I choose to self-check.
 
 Acceptance criteria:
 
 - Node public key fingerprint is exposed.
 - UI displays fingerprint before token use.
 - Node owner can publish fingerprint elsewhere.
-- User can confirm/deny key before sending prompt.
+- User can optionally confirm/deny key before sending prompt.
 
 Current evidence:
 
 - Fingerprint generation implemented
 - Public node cards display/copy fingerprint when present
-- Trust notice tells users to verify out-of-band before tasting
-- Browser tasting requires trust checkbox and exact fingerprint confirmation when a node key exists
+- Privacy notice tells users not to send secrets and explains node/provider limits
+- Browser tasting requires privacy caveat checkbox; exact fingerprint confirmation and URL verification are optional self-checks when a node key exists
 
 #### US-10.2 — Persist data durably
 
@@ -691,7 +691,7 @@ Success indicators:
 - Multi-axis node contribution score
 - Auto-generated Showcase categories
 - Persistent browser identity for repeated tastings
-- Out-of-band fingerprint URL verification
+- Optional out-of-band fingerprint URL verification
 - IP-level token rate limiting
 
 ### Next recommended hardening stories

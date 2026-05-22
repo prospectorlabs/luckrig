@@ -43,7 +43,7 @@
 
 ## 重要なPOC caveat
 
-初期POCのtokenは、ローカルE2Eテストを成立させるために `session_secret` を含んでいました。現在は `user_public_key` / `node_public_key` を使う **public-key POC mode** を実装済みで、`sha256:` 公開鍵fingerprintも返します。legacy session-secret modeは後方互換として残っています。
+初期POCのtokenは、ローカルE2Eテストを成立させるために `session_secret` を含んでいました。現在は `user_public_key` / `node_public_key` を使う **public-key POC mode** を実装済みで、`sha256:` 公開鍵fingerprintも返します。legacy session-secret modeは後方互換として残っています。なお、この暗号機構は価値訴求の主役ではなく、通常ログや通信観測に平文をそのまま残さないためのサービス側の気遣いとして扱います。機密情報、個人情報、業務上守るべき内容は送らないでください。
 
 CONCEPT上の最終形：
 
@@ -59,7 +59,7 @@ CONCEPT上の最終形：
 - token payloadには利用者公開鍵とノード公開鍵を含める（秘密鍵は含めない）
 - promptはノード公開鍵で暗号化し、proxyがノード秘密鍵で復号
 - responseは利用者公開鍵で暗号化し、clientが利用者秘密鍵で復号
-- tracker + nodeの共謀による公開鍵すり替えリスクはCONCEPT通り残る（POCはfingerprintを表示し、ブラウザ試食前に一致入力を要求する。別経路公開などの強い運用は任意のhardening）
+- tracker + nodeの共謀による公開鍵すり替えリスクはCONCEPT通り残る（POCはfingerprintを表示し、任意でURL照合/一致入力できる。別経路公開などの強い運用は任意のhardening）
 
 ## ローカル起動例
 
@@ -150,8 +150,8 @@ npm test
 
 Public UIの各ノードカードには `試食する / browser POC` パネルがあります。node public keyがある場合、ブラウザはWebCrypto X25519/HKDF/AES-GCMでpublic-key modeを使います。流れは以下です。
 
-1. trust checkboxを確認
-2. fingerprint確認欄に別経路で確認した値を貼り付け
+1. privacy caveat checkboxで「機密情報を送らない」ことを確認
+2. 任意でfingerprint確認欄に別経路で確認した値を貼り付け、またはURL照合する
 3. `POST /api/tokens` で短命tokenを取得
 4. browser WebCryptoでpromptをnode public key向けにsubtext化
 5. node proxyへOpenAI互換リクエスト

@@ -312,8 +312,8 @@ async function runBrowserTasting(node, fragment) {
 
   output.hidden = true;
   download.hidden = true;
-  if (!trust.checked) throw new Error('trust model checkbox is required');
-  if (hasNodePublicKey && fingerprintConfirm !== node.node_public_key_fingerprint) {
+  if (!trust.checked) throw new Error('privacy caveat checkbox is required');
+  if (hasNodePublicKey && fingerprintConfirm && fingerprintConfirm !== node.node_public_key_fingerprint) {
     throw new Error('node public key fingerprint confirmation does not match');
   }
   if (!prompt) throw new Error('prompt is required');
@@ -342,7 +342,7 @@ async function runBrowserTasting(node, fragment) {
   const tokenPayload = await tokenRes.json();
   if (!tokenRes.ok) throw new Error(tokenPayload.error ?? `token HTTP ${tokenRes.status}`);
 
-  status.textContent = 'encrypting prompt...';
+  status.textContent = 'preparing prompt...';
   const encryptedPrompt = tokenPayload.crypto_mode === 'public-key'
     ? await encryptJsonToSubtextPublicKeyBrowser({ prompt }, { publicKeyPem: tokenPayload.node_public_key })
     : await encryptJsonToSubtextBrowser({ prompt }, { sessionSecret: tokenPayload.session_secret });
@@ -365,7 +365,7 @@ async function runBrowserTasting(node, fragment) {
   const sseText = await proxyRes.text();
   if (!proxyRes.ok) throw new Error(sseText || `proxy HTTP ${proxyRes.status}`);
 
-  status.textContent = 'decrypting response...';
+  status.textContent = 'preparing response...';
   const { encryptedContent, chunk_timestamps } = parseSseText(sseText);
   const envelope = tokenPayload.crypto_mode === 'public-key'
     ? await decryptJsonFromSubtextPublicKeyBrowser(encryptedContent, { privateKey: browserKeys.privateKey })
@@ -380,7 +380,7 @@ async function runBrowserTasting(node, fragment) {
   download.download = replayFilename(replay);
   download.hidden = false;
   download.textContent = `download replay JSON (${download.download})`;
-  status.textContent = `done: ${replay.tok_per_sec ?? '—'} tok/s, crypto=${tokenPayload.crypto_mode}, truncated=${replay.limited_output_truncated}`;
+  status.textContent = `done: ${replay.tok_per_sec ?? '—'} tok/s, truncated=${replay.limited_output_truncated}`;
 }
 
 
@@ -550,7 +550,7 @@ function renderNode(node) {
     verifyButton.disabled = true;
   } else {
     fingerprintPanel.dataset.state = 'present';
-    fingerprintHelp.textContent = 'verify out-of-band before tasting';
+    fingerprintHelp.textContent = 'optional self-check for key substitution risk';
     copyButton.addEventListener('click', async () => {
       const original = copyButton.textContent;
       try {

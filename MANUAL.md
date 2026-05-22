@@ -39,14 +39,14 @@ luckrigは「今動いているかもしれない誰かのリグ」を試す場�
 
 ノードが落ちてもペナルティはありません。trackerは自動で `unavailable` として扱います。
 
-### 2.2 trust model
+### 2.2 送信内容とtrust model
 
-luckrigのプライバシー設計は「頑張らなければ見えない」です。
+luckrigのプライバシー設計は「頑張らなければ見えない」です。暗号の仕組みは価値訴求の主役ではなく、サービス提供側の気遣いとして扱います。
 
 目指すこと:
 
 - 通常のログに平文prompt/responseを残さない
-- tcpdump等で見ても平文が見えない
+- tcpdump等で見ても平文がそのまま見えない
 - subtext + 暗号化payloadで通信する
 
 できないこと:
@@ -55,7 +55,7 @@ luckrigのプライバシー設計は「頑張らなければ見えない」で�
 - ノード提供者がproxy/推論プロセス内部をinstrumentすることを防ぐ
 - tracker + nodeが共謀して公開鍵をすり替えることを完全に防ぐ
 
-試食前には、node public key fingerprintを別経路で確認してください。
+したがって、機密情報、個人情報、業務上守るべき内容は送らないでください。node public key fingerprintの別経路確認は任意の自己検証手段として用意されています。
 
 ### 2.3 POC上の暗号モード
 
@@ -66,7 +66,7 @@ luckrigのプライバシー設計は「頑張らなければ見えない」で�
 | public-key mode | Node/CLI E2Eおよびブラウザ試食。node public key / user public keyを使う | 実装済み |
 | legacy session-secret mode | node public keyがない古いノード向けfallback | 実装済み・後方互換扱い |
 
-public-key modeを前提にし、UIではfingerprint一致入力を必須にしています。さらに強い運用をする場合は、GitHub等の別経路でfingerprintを公開してください。
+public-key modeを前提にし、UIではfingerprint表示・コピー・URL照合を任意の自己検証として提供します。さらに強い運用をする場合は、GitHub等の別経路でfingerprintを公開してください。
 
 ---
 
@@ -456,12 +456,12 @@ http://127.0.0.1:8787/
 | user id | 任意。例: `browser-poc` |
 | contribution score | `0`ならlimited、`1`以上ならcontributor |
 | prompt | 試したいprompt |
-| trust checkbox | 必須 |
+| privacy caveat checkbox | 必須。機密情報を送らないことを確認 |
 
 実行:
 
 ```text
-token取得 → 暗号化 → 試食
+token取得 → 試食
 ```
 
 成功すると:
@@ -613,7 +613,7 @@ node src/proxy/server.js
 
 以下を確認してください:
 
-- trust checkboxを入れたか
+- privacy caveat checkboxを入れたか
 - promptを入力したか
 - proxy URLが正しいか
 - proxyが起動しているか
@@ -683,8 +683,8 @@ http://127.0.0.1:8787/
 1. `試食する / browser POC` を開く
 2. proxy URLが `http://127.0.0.1:8788/v1` になっていることを確認
 3. promptを入力
-4. trust checkboxを入れる
-5. `token取得 → 暗号化 → 試食` を押す
+4. privacy caveat checkboxを入れる
+5. `token取得 → 試食` を押す
 6. responseとreplay downloadを確認
 
 CLI/Node E2Eで確認する場合:
@@ -726,4 +726,3 @@ google-chrome \
 ```
 
 撮影後は `docs/images/*.svg` を `docs/images/*.png` に置き換え、本マニュアル内のリンク先も差し替えてください。SVGモックアップと現UIに乖離がないかも併せて確認してください。
-

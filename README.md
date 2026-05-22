@@ -31,6 +31,10 @@
 - テキスト生成（OpenAI互換API）に限定
 - 画像生成 / 音声 / 認識はsubtext方式との整合性設計が確立してから (v6+)
 
+## 送信内容について
+
+luckrigは、通常の通信観測や素朴なログにプロンプト/出力がそのまま残らないよう処理します。ただし、ノード提供者がプロセス内部に踏み込めば平文を見られます。機密情報、個人情報、業務上守るべき内容は送らないでください。
+
 ## 最小実装の順序
 
 CONCEPT.md §「最小実装の順序」より：
@@ -64,9 +68,8 @@ npm test
 - metrics schema: [`docs/metrics-schema.md`](./docs/metrics-schema.md)
 - POC E2E: [`docs/poc.md`](./docs/poc.md)
 
-現段階のv1/POCとして、公開リスト、fingerprint表示/確認ゲート、ブラウザpublic-key試食POC、trust checkbox、死活監視、SQLite/JSONL永続化、durable token quota、prompt filter、token、node proxy、subtext、擬似SSE、replay保存までを一通りつないでいます。
+現段階のv1/POCとして、公開リスト、fingerprint表示/任意照合、ブラウザpublic-key試食POC、privacy caveat checkbox、死活監視、SQLite/JSONL永続化、durable token quota、prompt filter、token、node proxy、subtext、擬似SSE、replay保存までを一通りつないでいます。
 
 ## Status
 
-v1/POC実装完了。公開リスト、死活監視、SQLite/JSONL永続化、token、durable limited quota、prompt filter、node proxy、public-key subtext、browser public-key試食、queue可視化、環境フィルタ/比較ビュー、多軸貢献スコア、Showcase自動生成、browser identity永続化、別経路fingerprint自動照合、IP token rate limit、heuristic tokenizer replay、pseudo SSE、replay保存までをNode.js標準ライブラリのみで実装済み。コンセプト v5.2 確定。
-
+v1/POC実装完了。公開リスト、死活監視、SQLite/JSONL永続化、token、durable limited quota、prompt filter、node proxy、public-key subtext、browser public-key試食、queue可視化、環境フィルタ/比較ビュー、多軸貢献スコア、Showcase自動生成、browser identity永続化、別経路fingerprint任意照合、IP token rate limit、heuristic tokenizer replay、pseudo SSE、replay保存までをNode.js標準ライブラリのみで実装済み。コンセプト v5.3 確定。

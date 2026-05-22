@@ -20,7 +20,7 @@ tracker
   → health / telemetry collection
   → tasting token
   → node proxy
-  → subtext encrypted prompt
+  → prompt hiding
   → buffered generation
   → pseudo SSE response
   → local replay record
@@ -45,7 +45,7 @@ tracker
 - Multi-axis node contribution scoring
 - Auto-generated Showcase categories
 - Browser identity persistence for repeated tastings
-- Out-of-band fingerprint URL verification
+- Optional out-of-band fingerprint URL verification
 - IP-based token rate limiting
 - subtext-based prompt / response hiding
 - Buffered generation with pseudo SSE playback
@@ -60,7 +60,7 @@ tracker
 - Payment / credit marketplace
 - Attestation / canary prompts / output verification
 - Image/audio modality filtering beyond text prompt policy
-- Strong key-substitution mitigation beyond displayed fingerprint confirmation
+- Strong key-substitution mitigation beyond optional fingerprint self-checks
 
 ### 2.3 Non-negotiable product constraints
 
@@ -477,7 +477,7 @@ Implementation note:
 
 - Preferred POC mode is `crypto_mode: public-key`; token carries public keys, never private keys.
 - Legacy `session-secret` mode remains for compatibility only.
-- Current UI requires fingerprint confirmation before browser tasting. Stronger alternate trust channels can be added later to further mitigate tracker/node key substitution.
+- Current UI displays/copies fingerprints and offers exact fingerprint input or URL verification as optional self-checks. Stronger alternate trust channels can be added later to further mitigate tracker/node key substitution.
 
 ### 6.7 Contribution status
 
@@ -555,7 +555,7 @@ Behavior:
 
 ### 7.1 Intended protection
 
-subtext + AES-GCM is intended to prevent plaintext prompt / response from appearing in ordinary network capture or naive logs.
+subtext + AES-GCM is intended as an operational privacy courtesy: plaintext prompt / response should not appear in ordinary network capture or naive logs. It is not the main product promise, and users must not send secrets.
 
 ### 7.2 Explicit limits
 
@@ -583,7 +583,7 @@ POC simplification:
 - Tracker/proxy share HMAC secret for token verification.
 - Token carries user/node public keys, and the proxy decrypts with the node private key.
 - The client decrypts response with the user private key.
-- Tracker + node key-substitution risk remains. The current UI displays fingerprints and requires exact fingerprint input before browser tasting; alternate trust channels remain optional hardening.
+- Tracker + node key-substitution risk remains. The current UI displays fingerprints and offers exact fingerprint input or URL verification as optional self-checks; alternate trust channels remain optional hardening.
 
 ### 7.4 Token requirements
 
@@ -598,7 +598,7 @@ Current token:
 Hardening target for token/key trust:
 
 - Must prefer public-key mode.
-- Must expose public-key fingerprint and require user confirmation before browser tasting; stronger alternate trust channels are future hardening.
+- Must expose public-key fingerprint and allow optional user confirmation before browser tasting; stronger alternate trust channels are future hardening.
 
 ---
 
@@ -818,7 +818,7 @@ src/shared/                shared token/base64url helpers
 
 The v1/POC path is implemented and tested. Remaining items below are hardening or v6+ scope, not incomplete current-scope implementation:
 
-1. More alternate trust channels for node public-key fingerprint publication beyond the implemented fingerprint URL verifier.
+1. More alternate trust channels for node public-key fingerprint publication beyond the implemented optional fingerprint URL verifier.
 2. SQLite schema migration/admin tooling.
 3. Quota management UI and long-term abuse analytics.
 4. Production account/registration workflow around the existing node registration API.
@@ -845,4 +845,4 @@ The current POC is considered valid when all of the following hold:
 - Client can parse pseudo SSE and create a local replay record.
 - Replay record can be saved and loaded.
 - Invalid token is rejected.
-- Docs and UI require/display fingerprint confirmation and clearly state remaining trust limits.
+- Docs and UI require a privacy caveat acknowledgement, display optional fingerprint self-checks, and clearly state remaining trust limits.

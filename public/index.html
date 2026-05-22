@@ -42,9 +42,9 @@
 
     <main>
       <section class="notice trust-notice">
-        <strong>trust model:</strong> luckrigは「頑張らなければ見えない」ための実験的な設計です。
-        通常のログやtcpdumpに平文を残さないことを目指しますが、ノード提供者がプロセス内部に踏み込めばプロンプト/出力を見られます。
-        試食前にはnode public key fingerprintを別経路で確認してください。
+        <strong>送信内容について:</strong> luckrigは、通常の通信観測や素朴なログにプロンプト/出力がそのまま残らないよう処理します。
+        ただし、ノード提供者がプロセス内部に踏み込めば平文を見られます。
+        機密情報、個人情報、業務上守るべき内容は送らないでください。
       </section>
 
       <section class="summary" id="summary" aria-live="polite"></section>
@@ -72,14 +72,14 @@
         <div class="showcase-badges"></div>
         <div class="contribution-panel"></div>
         <div class="tags"></div>
-        <section class="fingerprint-panel">
-          <div class="fingerprint-title">node public key fingerprint</div>
+        <details class="fingerprint-panel">
+          <summary class="fingerprint-title">任意のnode public key fingerprint自己検証</summary>
           <code class="fingerprint-value"></code>
           <div class="fingerprint-actions">
             <button class="copy-fingerprint" type="button">copy fingerprint</button>
             <span class="fingerprint-help"></span>
           </div>
-        </section>
+        </details>
         <details class="tasting-panel">
           <summary>試食する / browser POC</summary>
           <div class="tasting-grid">
@@ -97,7 +97,7 @@
             </label>
           </div>
           <label class="prompt-label fingerprint-url-label">
-            <span>fingerprint URL（任意: GitHub Gist / 自分のドメイン等）</span>
+            <span>fingerprint URL（任意の自己検証: GitHub Gist / 自分のドメイン等）</span>
             <input class="fingerprint-url" type="url" placeholder="https://example.com/luckrig-fingerprint.txt" />
           </label>
           <div class="fingerprint-verify-actions">
@@ -105,7 +105,7 @@
             <span class="fingerprint-verify-status"></span>
           </div>
           <label class="prompt-label fingerprint-confirm-label">
-            <span>fingerprint確認（別経路で確認した値を貼り付け）</span>
+            <span>fingerprint確認（任意: 別経路で確認した値を貼り付け）</span>
             <input class="fingerprint-confirm" type="text" placeholder="sha256:..." />
           </label>
           <label class="prompt-label">
@@ -114,10 +114,10 @@
           </label>
           <label class="trust-check">
             <input class="tasting-trust" type="checkbox" />
-            <span>trust modelを理解しました。ノード提供者がプロセス内部に踏み込めば平文を見られること、fingerprintを別経路で確認し、上の入力欄に一致する値を貼り付けたことを了承します。</span>
+            <span>送信内容は通常ログやtcpdumpでそのまま見えないよう処理されますが、ノード提供者から完全に隠せるわけではありません。機密情報、個人情報、業務上守るべき内容を送らないことを了承します。</span>
           </label>
           <div class="tasting-actions">
-            <button class="run-tasting" type="button">token取得 → 暗号化 → 試食</button>
+            <button class="run-tasting" type="button">token取得 → 試食</button>
             <span class="tasting-status"></span>
           </div>
           <pre class="tasting-output" hidden></pre>

@@ -142,7 +142,7 @@ trackerが自動生成したShowcaseカテゴリと該当ノードを返しま�
 }
 ```
 
-レスポンスはBearer token、期限、`crypto_mode`、node public key、public key fingerprint、contribution tierを含みます。`user_public_key` を指定した場合はpublic-key modeになり、session secretは返りません。legacyとしてsession-secret modeも残っています。ブラウザ試食ではfingerprint一致入力を必須にしています。
+レスポンスはBearer token、期限、`crypto_mode`、node public key、public key fingerprint、contribution tierを含みます。`user_public_key` を指定した場合はpublic-key modeになり、session secretは返りません。legacyとしてsession-secret modeも残っています。ブラウザ試食ではfingerprint表示・コピー・URL照合を任意の自己検証として提供します。
 
 ### `GET /api/contribution/:user_id?score=1`
 
