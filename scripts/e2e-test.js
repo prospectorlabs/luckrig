@@ -24,6 +24,13 @@ const {
   timingPayloadFromReplay,
 } = await import('../src/client/replay.js');
 const { buildPlainChatBody } = await import('../src/client/tasting.js');
+
+async function collectChunks(chunksLike) {
+  if (Array.isArray(chunksLike)) return chunksLike.slice();
+  const out = [];
+  for await (const c of chunksLike) out.push(c);
+  return out;
+}
 const {
   decryptJsonFromSubtext,
   decryptJsonFromSubtextWithPrivateKey,
@@ -348,19 +355,25 @@ async function main() {
     nodeId: node.id,
     trackerSecret: process.env.LUCKRIG_TRACKER_SECRET,
   });
-  assert.equal(plainProxyResult.kind, 'plain-sse', 'plain mode must stream real SSE chunks, not pseudo-SSE');
-  assert.ok(plainProxyResult.chunks.length >= 3, 'plain mode SSE must produce multiple chunks');
-  assert.ok(plainProxyResult.chunks.join('').includes('[DONE]'));
+  assert.equal(plainProxyResult.kind, 'plain-sse-stream', 'plain mode + stream + record-moderation must use real streaming kind');
+  assert.equal(Array.isArray(plainProxyResult.chunks), false, 'plain-sse-stream chunks must be an async iterable');
+  const plainCollected = await collectChunks(plainProxyResult.chunks);
+  assert.ok(plainCollected.length >= 4, 'plain mode SSE must produce multiple per-token chunks');
+  assert.ok(plainCollected.join('').includes('[DONE]'));
   // Plaintext must NOT be subtext-encoded in plain mode.
-  assert.equal(hasSubtext(plainProxyResult.chunks.join('')), false);
+  assert.equal(hasSubtext(plainCollected.join('')), false);
 
-  const { content: plainContent, timing: plainTiming, chunk_timestamps: plainStamps } = parsePlainSseChunks(plainProxyResult.chunks);
+  const { content: plainContent, timing: plainTiming, chunk_timestamps: plainStamps } = parsePlainSseChunks(plainCollected);
   assert.equal(plainContent, `mock:${plainPrompt}`);
   assert.ok(plainTiming && plainTiming.object === 'luckrig.timing');
   assert.equal(plainTiming.crypto_mode, 'plain');
-  assert.ok(plainStamps.length >= 1);
+  assert.equal(plainTiming.streamed, true, 'plain-sse-stream timing must advertise streamed=true');
+  assert.ok(plainStamps.length >= 2, 'real streaming must produce multiple distinct chunk_timestamps');
+  assert.equal(plainProxyResult.response_envelope.streamed, true);
+  assert.equal(plainProxyResult.response_envelope.proxy_ttft_is_true_first_byte, true);
+  assert.ok(plainProxyResult.response_envelope.proxy_ttft_ms !== null);
 
-  const plainReplay = replayFromPlainSseChunks(plainProxyResult.chunks, {
+  const plainReplay = replayFromPlainSseChunks(plainCollected, {
     prompt: plainPrompt,
     node_id: node.id,
     model_name: 'luckrig-plain-poc',
@@ -465,7 +478,7 @@ async function main() {
       trackerSecret: process.env.LUCKRIG_TRACKER_SECRET,
       moderationEndpoint: 'http://mod.test/moderation/flag',
       moderationFetchImpl: flaggingFetch,
-      moderateOutput: false,
+      moderateOutput: 'off',
     }),
     (error) => error.statusCode === 451 && /moderation blocked input/.test(error.message),
     'flagged input must throw moderation 451',
@@ -485,20 +498,83 @@ async function main() {
     'unreachable moderation must fail closed',
   );
 
-  // Clean moderation → request succeeds, response envelope carries moderation report
-  const cleanResult = await processChatCompletion({
+  // Clean moderation in BLOCK mode → buffered plain SSE, output.checked=true, flagged=false
+  const cleanBlock = await processChatCompletion({
     body: modBody,
     authHeader: `Bearer ${modTokenRes.json.token}`,
     nodeId: node.id,
     trackerSecret: process.env.LUCKRIG_TRACKER_SECRET,
     moderationEndpoint: 'http://mod.test/moderation/clean',
     moderationFetchImpl: cleanFetch,
-    moderateOutput: true,
+    moderateOutput: 'block',
   });
-  assert.equal(cleanResult.kind, 'plain-sse');
-  assert.equal(cleanResult.response_envelope.moderation.input.checked, true);
-  assert.equal(cleanResult.response_envelope.moderation.input.flagged, false);
-  assert.equal(cleanResult.response_envelope.moderation.output.checked, true);
+  assert.equal(cleanBlock.kind, 'plain-sse', 'block-mode output moderation forces buffered plain-sse');
+  assert.equal(Array.isArray(cleanBlock.chunks), true);
+  assert.equal(cleanBlock.response_envelope.moderation.input.checked, true);
+  assert.equal(cleanBlock.response_envelope.moderation.input.flagged, false);
+  assert.equal(cleanBlock.response_envelope.moderation.output.checked, true);
+  assert.equal(cleanBlock.response_envelope.moderation.output.mode, 'block');
+  assert.equal(cleanBlock.response_envelope.streamed, false);
+
+  // Clean moderation in RECORD mode (default) → real streaming + post-hoc record
+  const cleanRecord = await processChatCompletion({
+    body: modBody,
+    authHeader: `Bearer ${modTokenRes.json.token}`,
+    nodeId: node.id,
+    trackerSecret: process.env.LUCKRIG_TRACKER_SECRET,
+    moderationEndpoint: 'http://mod.test/moderation/clean',
+    moderationFetchImpl: cleanFetch,
+    moderateOutput: 'record',
+  });
+  assert.equal(cleanRecord.kind, 'plain-sse-stream', 'record-mode output moderation must preserve real streaming');
+  const cleanCollected = await collectChunks(cleanRecord.chunks);
+  assert.ok(cleanCollected.join('').includes('[DONE]'));
+  assert.equal(cleanRecord.response_envelope.moderation.output.checked, true);
+  assert.equal(cleanRecord.response_envelope.moderation.output.flagged, false);
+  assert.equal(cleanRecord.response_envelope.moderation.output.mode, 'record');
+  assert.equal(cleanRecord.response_envelope.streamed, true);
+
+  // Flagged OUTPUT in RECORD mode → stream still delivered; flag recorded.
+  // The custom fetch lets input pass but flags the second call (the output
+  // check) so we exercise the post-hoc record path specifically.
+  const moderationFlagsPath = `/tmp/luckrig-e2e-mod-flags-${process.pid}.jsonl`;
+  await rm(moderationFlagsPath, { force: true });
+  let modCalls = 0;
+  const outputOnlyFlaggingFetch = async () => {
+    modCalls += 1;
+    const flagged = modCalls >= 2;
+    return {
+      ok: true,
+      async json() {
+        return flagged
+          ? { id: 'mock-mod-output-flag', results: [{ flagged: true, categories: { 'violence/graphic': true } }] }
+          : { id: 'mock-mod-output-clean', results: [{ flagged: false, categories: {} }] };
+      },
+    };
+  };
+  const flaggedOutputRecord = await processChatCompletion({
+    body: modBody,
+    authHeader: `Bearer ${modTokenRes.json.token}`,
+    nodeId: node.id,
+    trackerSecret: process.env.LUCKRIG_TRACKER_SECRET,
+    moderationEndpoint: 'http://mod.test/moderation/output-only',
+    moderationFetchImpl: outputOnlyFlaggingFetch,
+    moderateOutput: 'record',
+    moderationFlagsPath,
+  });
+  assert.equal(flaggedOutputRecord.kind, 'plain-sse-stream');
+  const flaggedCollected = await collectChunks(flaggedOutputRecord.chunks);
+  assert.ok(flaggedCollected.join('').includes('[DONE]'));
+  // The user DID receive output (record mode trades one bad slip for evidence).
+  assert.ok(flaggedCollected.join('').includes('mock:'));
+  // Envelope must reflect the flag and the operator's append-only log must
+  // have captured it for ban review.
+  assert.equal(flaggedOutputRecord.response_envelope.moderation.output.flagged, true);
+  assert.equal(flaggedOutputRecord.response_envelope.moderation.output.mode, 'record');
+  const flagFile = await import('node:fs/promises').then((m) => m.readFile(moderationFlagsPath, 'utf8'));
+  assert.match(flagFile, /"stage":"output"/);
+  assert.match(flagFile, /"streamed":true/);
+  await rm(moderationFlagsPath, { force: true });
 
   // ----- bans (CONCEPT §ノード提供者保護 / takedown) -----
 

@@ -29,7 +29,10 @@ export function replayFromProxyResult(result, { sessionSecret, userPrivateKey, t
   if (result.kind === 'sse') {
     return replayFromEncryptedSseChunks(result.chunks, { sessionSecret, userPrivateKey, ttft_ms });
   }
-  if (result.kind === 'plain-sse') {
+  if (result.kind === 'plain-sse' || result.kind === 'plain-sse-stream') {
+    // chunks may be a string[] (buffered) or an async iterable (streamed).
+    // The caller is responsible for materializing async iterables before
+    // passing the result here; this helper assumes chunks is a sync iterable.
     return replayFromPlainSseChunks(result.chunks, {
       prompt: result.prompt?.prompt ?? '',
       node_id: result.response_envelope?.node_id ?? 'unknown',

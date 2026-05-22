@@ -74,7 +74,12 @@ plain mode はTLS + ノードプロキシのログ非書き出し規約に依存
 luckrigは「素朴な検知 + 第三者モデレータ + Notice-and-Takedown」の3段で違法コンテンツに対処します。
 
 - ノードプロキシのローカル正規表現フィルタ（`src/shared/filter.js`）は常時有効
-- `LUCKRIG_MODERATION_ENDPOINT` を設定すると、入力と（既定で）出力を外部モデレーション（OpenAI Moderation API互換）に投げる。到達不能や失敗は**fail-closed**で 451 を返す
+- `LUCKRIG_MODERATION_ENDPOINT` を設定すると外部モデレーション（OpenAI Moderation API互換）に投げる
+  - **入力**は常に送信前ブロック。フラグなら 451、エンドポイント到達不能は **fail-closed** で 451
+  - **出力**は `LUCKRIG_MODERATE_OUTPUT` で挙動を選ぶ
+    - `record`（既定）：真SSEを維持。upstream のチャンクをそのまま流し、完了後に classifier を回し、フラグなら `data/moderation-flags.jsonl` に記録して運営者の ban レビューに回す。1回目は素通りするが、運営者が ban すれば 2 回目以降は止まる、という設計
+    - `block`：送信前に classifier 通過必須。plain mode でも全バッファになり真SSEは出ない。法務上「ユーザーは違法出力を一度も見てはならない」運用に必要
+    - `off` / `0`：出力モデレーションをスキップ
 - 利用者は `POST /api/abuse/report` で通報できる。**自動banはしない**（誤通報の巻き込みを避けるため）
 - 運営者は `POST /api/bans`（`LUCKRIG_DEV=1`）で `user_id` / `ip` / `node_id` を手動でban。banされた node はリストから消え、token発行も拒否される
 - 通報先は `LUCKRIG_ABUSE_CONTACT` で公開される（UIにも表示）
@@ -348,7 +353,8 @@ POST /chat/completions
 | `LUCKRIG_MODERATION_AUTH` | unset | モデレーションエンドポイント用のBearer token（必要なら） |
 | `LUCKRIG_MODERATION_MODEL` | `omni-moderation-latest` | モデレーションエンドポイントに渡すmodel名 |
 | `LUCKRIG_MODERATION_TIMEOUT_MS` | `5000` | モデレーション呼び出しのtimeout（ミリ秒）。**到達不能や失敗はfail-closed = 451** |
-| `LUCKRIG_MODERATE_OUTPUT` | `1` | `0`にすると出力側のモデレーションをスキップ（入力側は常に実行） |
+| `LUCKRIG_MODERATE_OUTPUT` | `record` | 出力モデレーションの挙動。`record` = ストリーミング維持＋事後記録（plain mode で真SSEを保つ）、`block` = 送信前に classifier 通過必須（全バッファ・真SSE不可）、`off` / `0` = スキップ |
+| `LUCKRIG_MODERATION_FLAGS_PATH` | `data/moderation-flags.jsonl` | 出力モデレーションがフラグした記録の append-only ログ（運営者の ban レビュー用） |
 
 ---
 

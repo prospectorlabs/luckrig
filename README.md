@@ -47,7 +47,7 @@ plain mode（基線）はTLS + ノードプロキシのログ非書き出し規�
 児童性的搾取、テロ・大量暴力支援、その他違法な入力/出力は禁止しています。luckrigは3段構えで対応します。
 
 1. ノードプロキシのローカル正規表現フィルタ
-2. ノードプロキシの外部モデレーションフック（`LUCKRIG_MODERATION_ENDPOINT`、OpenAI Moderation互換、**到達不能時はfail-closed**）
+2. ノードプロキシの外部モデレーションフック（`LUCKRIG_MODERATION_ENDPOINT`、OpenAI Moderation互換、**入力は送信前ブロック・到達不能時はfail-closed**／出力は既定 `record`（ストリーミング維持＋事後記録）で plain modeの真SSEを壊さない。法務要件があれば `block` に切替）
 3. トラッカー側のNotice-and-Takedown：`POST /api/abuse/report`（誰でも通報可、IPレート制限、**自動banはしない**）／`POST /api/bans`（運営者がレビュー後に手動でban／`LUCKRIG_DEV=1`）
 
 Abuse contactは `GET /api/abuse-contact` で公開されます。詳細は SPEC.md §7.1b / §7.1c を参照。

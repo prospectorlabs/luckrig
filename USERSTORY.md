@@ -577,7 +577,7 @@ Acceptance criteria:
 - `LUCKRIG_MODERATION_ENDPOINT` enables the hook. When unset, only the local regex filter applies.
 - Flagged input is rejected with HTTP 451 and the offending text is never echoed back.
 - The moderation endpoint being unreachable, returning non-2xx, or returning unparseable JSON is treated as `flagged=true` (fail-closed).
-- Output is moderated by default (`LUCKRIG_MODERATE_OUTPUT=1`), can be disabled per-deployment.
+- Output is moderated by default in `record` mode (`LUCKRIG_MODERATE_OUTPUT=record`): streams are preserved and flagged outcomes are appended to `data/moderation-flags.jsonl` for operator review. `block` mode is available for jurisdictions that require pre-send classification, and `off` disables output moderation entirely.
 - The response envelope carries a `moderation.{input,output}` summary that records `checked`, `flagged`, and `categories`.
 
 Current evidence:

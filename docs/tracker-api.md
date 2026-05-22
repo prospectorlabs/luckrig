@@ -335,4 +335,4 @@ curl -X POST http://127.0.0.1:8787/api/nodes \
 - この段階の `rarity_score` は公開リストの初期ソート用の簡易値。CONCEPT.mdの貢献スコアとは別物
 - ノードが落ちてもペナルティなし。`unavailable` 表示になるだけ
 - tok/sはここでは測らない。集計値は opt-in `POST /api/replay/timing` 経由のサンプルから算出する。ノード自己申告は一次ソースとして使わない。
-- モデレーションはノード側プロキシ（`LUCKRIG_MODERATION_ENDPOINT`）が担当する。trackerはban / 通報受付 / Abuse contact公開を担当する。
+- モデレーションはノード側プロキシ（`LUCKRIG_MODERATION_ENDPOINT`）が担当する。出力モデレーションは `record`（既定・ストリーミング維持・事後記録）と `block`（送信前ブロック・全バッファ）の切り替え可能。trackerはban / 通報受付 / Abuse contact公開を担当する。

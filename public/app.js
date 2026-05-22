@@ -278,6 +278,49 @@ function parsePlainSseText(text) {
   return { events, content, chunk_timestamps, timing };
 }
 
+async function consumeSseStream(body, started) {
+  // Consume a ReadableStream of SSE bytes incrementally so chunk_timestamps
+  // correspond to real upstream arrival times. Returns the full sseText for
+  // later parsing, plus per-content-chunk timestamps for tok/s calc.
+  if (!body || typeof body.getReader !== 'function') {
+    // Fall back to text() for environments without ReadableStream (tests).
+    const sseText = await (typeof body?.text === 'function' ? body.text() : Promise.resolve(String(body ?? '')));
+    return { sseText, chunk_timestamps: [], first_byte_at: null };
+  }
+  const decoder = new TextDecoder('utf-8');
+  const reader = body.getReader();
+  let sseText = '';
+  let buffer = '';
+  const chunk_timestamps = [];
+  let first_byte_at = null;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (first_byte_at === null) first_byte_at = performance.now();
+    const piece = decoder.decode(value, { stream: true });
+    sseText += piece;
+    buffer += piece;
+    let sepIdx;
+    while ((sepIdx = buffer.indexOf('\n\n')) !== -1) {
+      const event = buffer.slice(0, sepIdx);
+      buffer = buffer.slice(sepIdx + 2);
+      for (const line of event.split(/\r?\n/)) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice('data: '.length).trim();
+        if (!data || data === '[DONE]') continue;
+        let parsed;
+        try { parsed = JSON.parse(data); } catch { continue; }
+        if (parsed?.object === 'luckrig.timing') continue;
+        const delta = parsed?.choices?.[0]?.delta?.content;
+        if (typeof delta === 'string' && delta.length > 0) {
+          chunk_timestamps.push(Date.now());
+        }
+      }
+    }
+  }
+  return { sseText, chunk_timestamps, first_byte_at };
+}
+
 function buildPlainReplayRecordBrowser({ prompt, content, timing, chunk_timestamps = [], ttft_ms = null, node_id, model_name }) {
   const tokenEstimate = estimateTokens(content, { modelName: model_name });
   const outputTokens = tokenEstimate.tokens;
@@ -458,23 +501,30 @@ async function runBrowserTasting(node, fragment) {
     },
     body: JSON.stringify(chatBody),
   });
-  const sseText = await proxyRes.text();
-  if (!proxyRes.ok) throw new Error(sseText || `proxy HTTP ${proxyRes.status}`);
+  if (!proxyRes.ok) {
+    const errText = await proxyRes.text();
+    throw new Error(errText || `proxy HTTP ${proxyRes.status}`);
+  }
 
   status.textContent = 'preparing response...';
   let replay;
   if (issuedMode === 'plain') {
-    const { content, chunk_timestamps, timing } = parsePlainSseText(sseText);
+    // True per-chunk streaming consumption so chunk_timestamps reflect
+    // real upstream arrival times, not all-at-once buffer flush.
+    const { sseText, chunk_timestamps, first_byte_at } = await consumeSseStream(proxyRes.body, started);
+    const { content, timing } = parsePlainSseText(sseText);
     replay = buildPlainReplayRecordBrowser({
       prompt,
       content,
       timing,
       chunk_timestamps,
-      ttft_ms: Math.round(performance.now() - started),
+      ttft_ms: first_byte_at !== null ? Math.round(first_byte_at - started) : Math.round(performance.now() - started),
       node_id: node.id,
       model_name: chatBody.model,
     });
   } else {
+    // Subtext mode is buffered by design; reading as text is correct.
+    const sseText = await proxyRes.text();
     const { encryptedContent, chunk_timestamps } = parseSseText(sseText);
     const envelope = issuedMode === 'public-key'
       ? await decryptJsonFromSubtextPublicKeyBrowser(encryptedContent, { privateKey: browserKeys.privateKey })

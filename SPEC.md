@@ -48,7 +48,8 @@ tracker
 - Browser identity persistence for repeated tastings
 - Optional out-of-band fingerprint URL verification
 - IP-based token rate limiting
-- Buffered generation with pseudo SSE playback (subtext mode only)
+- Real upstream SSE pass-through in plain mode (record-mode output moderation preserves true streaming)
+- Buffered generation with pseudo SSE playback (subtext mode, non-stream, or block-mode output moderation)
 - Local replay persistence
 - Opt-in timing-metadata upload from client to tracker (no prompt / response body)
 - Local regex prompt filter + opt-in external moderation hook (OpenAI Moderation API-compatible) with fail-closed behavior on input and (default-on) on output
@@ -665,10 +666,14 @@ subtext + AES-GCM is intended as an operational privacy courtesy: plaintext prom
 The proxy supports an external moderation hook (`LUCKRIG_MODERATION_ENDPOINT`) compatible with the OpenAI Moderation API.
 
 - Input is moderated before the prompt is forwarded to upstream.
-- Output is moderated by default before being returned to the client (`LUCKRIG_MODERATE_OUTPUT=0` to disable).
+- Output moderation has three modes selected via `LUCKRIG_MODERATE_OUTPUT`:
+  - `record` (default): non-blocking. The proxy streams upstream SSE chunks to the client in real time (in plain mode + `stream:true`) and runs the moderation classifier afterwards. A flagged outcome is recorded in the response envelope and appended to `data/moderation-flags.jsonl` for the operator to act on (manual ban).
+  - `block`: fail-closed. The proxy fully buffers the response, runs moderation, and returns HTTP 451 if flagged. Plain mode loses real SSE in this mode.
+  - `off` (`0` / `false`): skip output moderation entirely.
 - Network / HTTP / parse failures of the moderation endpoint result in `flagged=true, hard_fail=true` — the request is **rejected with HTTP 451**, not silently passed through.
-- A moderation summary is included in the response envelope: `moderation.input.{checked,flagged,categories}` and `moderation.output.{checked,flagged,categories}`. The plaintext prompt and response are never sent back via this summary.
+- A moderation summary is included in the response envelope: `moderation.input.{checked,flagged,categories}` and `moderation.output.{checked,flagged,categories,mode}`. The plaintext prompt and response are never sent back via this summary.
 - The local regex filter (`src/shared/filter.js`) continues to run before the external hook as a fast first line.
+- Trade-off note for `record`: the requesting user may briefly see flagged content before the operator's manual ban takes effect on subsequent requests. Choose `block` if your jurisdiction or policy forbids that.
 
 luckrig does not claim safety. It claims: "every request is locally pattern-filtered, externally moderated when the operator configures a moderation endpoint, and bannable by the operator after the fact."
 
@@ -771,9 +776,10 @@ Permanent access rights and Showcase ranking must remain separate systems.
 ### 9.2 Not authoritative yet
 
 - `tok_per_sec` in POC replay uses approximate token estimation (`luckrig-heuristic-v1`).
-- In plain mode, `chunk_timestamps` reflect true upstream SSE chunk arrival, so `tok_per_sec` is a real client-side measurement (modulo token-count approximation).
-- In subtext mode, `chunk_timestamps` reflect pseudo SSE replay rate, not real generation rate. The authoritative tok/s in subtext mode is the proxy-measured value carried inside the response envelope.
-- `ttft_ms` in subtext mode is the proxy-measured upstream TTFT; in plain mode it is the client-observed first-chunk time (network-inclusive).
+- The source-of-truth split is **streamed vs buffered**, not plain vs subtext.
+  - **Streamed** (plain mode + `stream:true` + output moderation not in `block` mode): `chunk_timestamps` reflect real upstream SSE chunk arrival, so `tok_per_sec` is a real client-side measurement (modulo token-count approximation). `proxy_ttft_ms` is the true first-byte time and `proxy_ttft_is_true_first_byte` is `true`.
+  - **Buffered** (subtext mode, non-stream calls, or plain + output moderation in `block` mode): `chunk_timestamps` reflect re-play rate, not real generation rate. The authoritative tok/s comes from the proxy-measured value inside the response envelope. `proxy_ttft_ms` is the upstream round-trip duration and `proxy_ttft_is_true_first_byte` is `false`.
+- The `luckrig.timing` SSE trailing event and the response envelope both carry `streamed: bool` and `proxy_ttft_is_true_first_byte: bool` so clients can disambiguate per request.
 
 ### 9.3 Benchmark rule
 
@@ -970,6 +976,9 @@ The current POC is considered valid when all of the following hold:
 - Client can opt-in upload timing-only metadata to tracker (no prompt / response body), and the tracker rejects any disallowed field.
 - Public node list surfaces community-aggregated tok/s when timing uploads exist.
 - Proxy moderation hook rejects flagged input (451) and falls closed when the moderation endpoint is unreachable.
+- Proxy plain mode + `stream:true` + record-mode output moderation produces real streaming SSE: `kind: 'plain-sse-stream'`, async iterable `chunks`, multiple distinct chunk arrival timestamps, `response_envelope.streamed === true`, `response_envelope.proxy_ttft_is_true_first_byte === true`.
+- Proxy plain mode + `stream:true` + `block` mode buffers and returns `kind: 'plain-sse'` (array `chunks`).
+- Flagged output in `record` mode delivers the stream to the user, sets `response_envelope.moderation.output.flagged === true`, and appends a line to `data/moderation-flags.jsonl` for operator ban review.
 - Tracker honors `user_id` / `ip` / `node_id` bans: banned subjects are refused token issuance (403 or 404 for node bans) and banned nodes are hidden from the public list.
 - Abuse-report endpoint accepts a well-formed report (202), rejects unknown `subject_kind` (400), and enforces an IP rate limit (429).
 - `GET /api/abuse-contact` returns the operator-published abuse contact string.

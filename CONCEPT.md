@@ -204,8 +204,16 @@ tok/sとTTFTの集約には、リプレイ側のタイミングメタデータ�
 
 **計測の信頼性の置き方**
 
-- plain mode（基線）では、レスポンスはOpenAI互換のSSEで真にストリームされる。chunk_timestampsは利用者端末で計測した実生成速度に対応する。
-- subtext mode（任意の追加レイヤー）では、ノード側プロキシがレスポンスを完全バッファしてから擬似SSEで返すため、利用者側のchunk_timestampsは「ノードプロキシが再生したレート」であって実生成速度ではない。この場合のtok/sはノードプロキシが計測した値（response envelope内）を一次ソースとして扱い、利用者側はそれをそのままリプレイに永続化する。
+源泉の本当の区別は plain/subtext ではなく、**streamed か buffered か**である。
+
+- **streamed**：plain mode + `stream:true` で、かつ出力モデレーションが `record` モード（既定）か `off` のとき。プロキシは upstream のSSEチャンクをそのままパススルーする。利用者端末のchunk_timestampsとTTFTは実生成速度に対応する。
+- **buffered**：以下のいずれか。
+  - subtext mode（plain・public-key 問わず subtext は完成ペイロード一括隠蔽）
+  - 非ストリーミング呼び出し（`stream:false`）
+  - plain mode + 出力モデレーション `block` モード（送信前にフルバッファして classifier を待つ必要があるため）
+  - いずれの場合も、利用者側 chunk_timestamps は「プロキシが再生したレート」であって実生成速度ではない。tok/s はノードプロキシ計測値（response envelope 内）を一次ソースとして扱う。
+
+リプレイレコードと `luckrig.timing` フレームは `streamed: true|false` と `proxy_ttft_is_true_first_byte: true|false` を持つ。利用者は自分が見ている数値が「真の実測」か「再生レート」かを毎回区別できる。
 
 いずれのモードでも、tok/sを「ノード自身がリスティングに書いた自己申告値」ではなく**計測経路に紐づいた実測値**で扱う原則は維持する。
 
@@ -271,7 +279,9 @@ tok/sとTTFTの集約には、リプレイ側のタイミングメタデータ�
 
 一方リプレイに記録されるTTFTは、ノード側プロキシがSSEの最初のチャンク到達を記録した値——推論エンジン単体の性能に近い数値である。ネットワーク変数を排除したことで、「このGPU・このモデル・このチューニングでのTTFT」をより正確に評価できる。
 
-plain modeでは、TTFTは利用者端末側の真のSSE体感値となる（ネットワーク変数を含む）。subtext modeを使う場合は、ノードプロキシがSSEの最初のチャンク到達を記録した値が一次ソースとなり、ネットワーク変数を排除した純粋インフラ評価値を得られる。リプレイはどちらの値も保持する（`network_ttft_ms` と `proxy_ttft_ms`）。
+streamed plain mode のTTFTは、ノードプロキシが upstream の first byte 到達を記録した `proxy_ttft_ms` と、利用者端末側で `fetch` の first chunk 到達を記録した `network_ttft_ms` の両方をリプレイに保持する。前者はネットワーク変数を排除した純粋インフラ評価値、後者はユーザー体感値である。
+
+buffered（subtext, 非stream, 出力モデレーションblock）のときの `proxy_ttft_ms` は upstream の往復時間であって真の first-byte ではない。リプレイレコードは `proxy_ttft_is_true_first_byte: false` でこれを明示する。
 
 リプレイは妥協の産物ではなく、luckrigが「インフラ評価のリアルタイムマップ」であるというコンセプトに忠実な設計である。副次的な価値として、リプレイデータが時系列でのノード評価にも使える。
 
@@ -383,7 +393,13 @@ NSFWコンテンツは通さない。プロンプト段階での検知を基本�
 luckrigはノード提供者と運営者の双方を、違法コンテンツの処理プロセスから守る義務がある。具体的な判定基準は実例で精緻化していくが、メカニズム自体はv1から有効にする。
 
 1. **ローカル正規表現フィルタ（`src/shared/filter.js`）**：素朴なNSFWキーワードや重い創作キーワードに即座に反応する第一段。低コスト・低精度。プロキシで全リクエストに対して走る。
-2. **外部モデレーションフック（`LUCKRIG_MODERATION_ENDPOINT`）**：OpenAI Moderation API互換のエンドポイント（OpenAI本体、ローカルのLlama-Guard、Anthropic Moderation等）に、入力プロンプトと（任意で）出力レスポンスを投げてフラグ判定する。`sexual/minors`等の重要カテゴリでフラグが立てば 451 で拒否する。**モデレーションエンドポイントが到達不能な場合はfail-closed**（疎通障害を悪用したバイパスを防ぐ）。プロキシのresponse envelopeに `moderation.input.checked` / `moderation.output.checked` を記録する。
+2. **外部モデレーションフック（`LUCKRIG_MODERATION_ENDPOINT`）**：OpenAI Moderation API互換のエンドポイント（OpenAI本体、ローカルのLlama-Guard、Anthropic Moderation等）に投げてフラグ判定する。
+   - **入力モデレーション**：常に送信前ブロック。フラグが立てば 451 で拒否し、upstream には何も渡らない。エンドポイントが到達不能な場合は fail-closed（疎通障害を悪用したバイパスを防ぐ）。
+   - **出力モデレーション**：`LUCKRIG_MODERATE_OUTPUT` で挙動を選べる。
+     - `record`（既定）：ストリーミングを優先する。upstreamのSSEを真パススルーで利用者に流し、完了後にclassifierで判定する。フラグが立てば response envelope と `data/moderation-flags.jsonl` に記録され、運営者の手動banの起点になる。「1回目は素通りするが2回目はbanで止まる」というトレードオフを明示的に取る。
+     - `block`：送信前ブロック。upstreamを全バッファしてclassifierが通ってから返す。plain modeでも真SSEは出ない。法務要件で「ユーザーは違法出力を一切見てはならない」という運用に必要。
+     - `off`：出力モデレーションをスキップ。
+   - プロキシのresponse envelopeに `moderation.input.{checked,flagged,categories}` / `moderation.output.{checked,flagged,categories,mode}` を記録する。
 3. **Notice-and-Takedown（トラッカー側のbanメカニズム）**：`POST /api/abuse/report` で利用者が通報できる。通報は人間レビュー前提で `data/abuse-reports.jsonl` に蓄積され、**自動banはしない**（誤通報での自動巻き込みを避ける）。トラッカー運営者は `POST /api/bans` (`LUCKRIG_DEV=1`) で `user_id` / `ip` / `node_id` を即座に遮断できる。banされた `node_id` は公開リストから隠れ、token発行も拒否される。
 
 luckrigは「完全に安全」とは謳わない。「**素朴な検知 + 第三者モデレータ + Notice-and-Takedown** の3段を設計上きちんと運用している」ことを免責の根拠の一つとする。
@@ -458,4 +474,4 @@ luckrigは「完全に安全」とは謳わない。「**素朴な検知 + 第�
 
 ---
 
-*最終更新：2026-05-22（v5.5、3段構えモデレーション（local filter + 外部 moderation hook + Notice-and-Takedown ban / abuse report）をv1に繰り上げて実装；§フィルタリング方針を更新；v6宿題から法的下回りを除外し正式な法人化・利用規約整備のみ残す）*
+*最終更新：2026-05-22（v5.6、出力モデレーションを `record`（既定・ストリーミング維持・事後記録）と `block`（送信前ブロック・全バッファ）に分離。plain mode の真SSE復活。源泉の区別を plain/subtext から streamed/buffered に整理。`luckrig.timing` と response envelope に `streamed` / `proxy_ttft_is_true_first_byte` を明示。`data/moderation-flags.jsonl` を運営者向け ban レビュー導線として追加）*
