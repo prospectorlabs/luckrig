@@ -1,0 +1,16 @@
+{
+  "name": "luckrig",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "On-prem LLM inference API sharing platform — tracker prototype.",
+  "scripts": {
+    "start": "node src/tracker/server.js",
+    "dev": "LUCKRIG_DEV=1 node --watch src/tracker/server.js",
+    "check": "node --check src/tracker/server.js",
+    "test:smoke": "node scripts/smoke-test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>luckrig tracker</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <p class="eyebrow">luckrig tracker prototype</p>
+      <h1>今この瞬間、誰かのリグで動いているLLM推論API</h1>
+      <p class="lead">
+        OpenAI互換APIを喋るオンプレミスノードの公開リスト。SLAなし、保証なし。
+        ただし、どんな構成が今動いているかを見えるようにする。
+      </p>
+      <div class="actions">
+        <button id="refresh" type="button">更新</button>
+        <label class="filter">
+          <span>status</span>
+          <select id="status-filter">
+            <option value="all">all</option>
+            <option value="available">available</option>
+            <option value="unavailable">unavailable</option>
+            <option value="unknown">unknown</option>
+          </select>
+        </label>
+      </div>
+    </header>
+
+    <main>
+      <section class="notice">
+        <strong>v1 scope:</strong> テキスト生成のみ。tok/sやTTFTの本計測、キューUX、subtext、リプレイは後続ステップ。
+        この画面はまず「公開リスト + 死活監視」を立ち上げるためのものです。
+      </section>
+
+      <section class="summary" id="summary" aria-live="polite"></section>
+      <section class="nodes" id="nodes" aria-live="polite"></section>
+    </main>
+
+    <template id="node-card-template">
+      <article class="node-card">
+        <div class="card-topline">
+          <span class="status-pill"></span>
+          <span class="rarity"></span>
+        </div>
+        <h2></h2>
+        <dl class="specs">
+          <div><dt>model</dt><dd data-field="model_name"></dd></div>
+          <div><dt>quant</dt><dd data-field="quantization"></dd></div>
+          <div><dt>LoRA</dt><dd data-field="lora"></dd></div>
+          <div><dt>GPU</dt><dd data-field="gpu"></dd></div>
+          <div><dt>VRAM</dt><dd data-field="vram_gb"></dd></div>
+          <div><dt>ctx</dt><dd data-field="context_length"></dd></div>
+        </dl>
+        <p class="availability"></p>
+        <p class="note"></p>
+        <div class="tags"></div>
+        <footer class="health"></footer>
+      </article>
+    </template>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

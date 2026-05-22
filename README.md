@@ -37,7 +37,26 @@ CONCEPT.md §「最小実装の順序」より：
 6. リプレイ機能（ローカル永続化、`~/.luckrig/history/`）
 7. 貢献スコアと権限管理
 
+
+## 現在のプロトタイプ
+
+Step 1として、依存なしの **tracker prototype** を実装済みです。
+
+```bash
+source .tools/git-env.sh   # Codexサンドボックス内でgitを使う場合
+npm start                  # http://127.0.0.1:8787
+npm run check
+npm run test:smoke
+```
+
+- 公開リストUI: `GET /`
+- tracker health: `GET /api/health`
+- ノード一覧: `GET /api/nodes`
+- 詳細: [`docs/tracker-api.md`](./docs/tracker-api.md)
+
+現段階ではDB・認証・トークン・subtext・擬似SSEは未実装です。CONCEPT.mdの最小実装順序に従い、まず無登録者向けの公開リストと死活監視だけを立ち上げています。
+
 ## Status
 
-設計フェーズ。実装スタック未確定。コンセプト v5.2 確定。
+実装開始。Step 1（公開リスト + 死活監視）のtracker prototypeをNode.js標準ライブラリのみで実装済み。コンセプト v5.2 確定。
 

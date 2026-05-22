@@ -1,0 +1,50 @@
+[
+  {
+    "id": "first-5090-qwen3",
+    "display_name": "初号5090 / Qwen3-35B-A3B",
+    "endpoint_url": "http://127.0.0.1:8088/v1",
+    "health_url": "http://127.0.0.1:8088/health",
+    "model_name": "Qwen3-35B-A3B",
+    "quantization": "Q4_K_XL",
+    "lora": "なし",
+    "gpu": "RTX 5090",
+    "vram_gb": 32,
+    "context_length": 65536,
+    "availability_note": "平日夜〜朝",
+    "tuning_note": "MTP n_max=2が最速。長文RAGはSPEC=none推奨。ctx=131072がVRAM 32GBに収まる限界。",
+    "tags": ["initial-node", "high-end", "llama.cpp"],
+    "created_at": "2026-05-22T00:00:00.000Z"
+  },
+  {
+    "id": "showcase-rpi5-llama32-1b",
+    "display_name": "Showcase / Raspberry Pi 5",
+    "endpoint_url": "http://127.0.0.1:18088/v1",
+    "health_url": "http://127.0.0.1:18088/health",
+    "model_name": "llama3.2-1B",
+    "quantization": "Q4_K_M",
+    "lora": "なし",
+    "gpu": "Raspberry Pi 5 / CPU",
+    "vram_gb": 0,
+    "context_length": 8192,
+    "availability_note": "実験用・不定期",
+    "tuning_note": "低スペックShowcase枠。速度ではなく『最低スペックで動いている』ことに価値がある。",
+    "tags": ["showcase", "low-power", "cpu"],
+    "created_at": "2026-05-22T00:00:00.000Z"
+  },
+  {
+    "id": "showcase-m3max-qwen-small",
+    "display_name": "Showcase / M3 Max unified memory",
+    "endpoint_url": "http://127.0.0.1:28088/v1",
+    "health_url": "http://127.0.0.1:28088/health",
+    "model_name": "Qwen2.5-14B-Instruct",
+    "quantization": "Q5_K_M",
+    "lora": "なし",
+    "gpu": "Apple M3 Max",
+    "vram_gb": 48,
+    "context_length": 32768,
+    "availability_note": "週末中心",
+    "tuning_note": "ユニファイドメモリ構成の参考枠。GPU名だけでなくメモリ構成込みで評価する。",
+    "tags": ["showcase", "apple-silicon"],
+    "created_at": "2026-05-22T00:00:00.000Z"
+  }
+]
