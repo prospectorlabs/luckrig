@@ -2,6 +2,8 @@
 
 **日本語** | [English](./README.en.md)
 
+![luckrig — オンプレミスLLM推論APIシェアリングプラットフォーム](./assets/banner.png)
+
 > 今この瞬間、誰かのオンプレミス環境で動いているLLM推論APIを、貢献ベースで試せる場所
 
 > [!NOTE]
@@ -77,6 +79,10 @@ CONCEPT.md §「最小実装の順序」より：
 ## 現在のプロトタイプ
 
 依存なしの **POC prototype** を実装済みです。tracker / token / proxy / subtext / pseudo SSE / replay までE2Eで検証できます。
+
+![公開リストUI（プロトタイプ）— サマリー、環境比較表、希少性順のノードカード](./assets/prototype.png)
+
+> 上図はシードノード3構成（RTX 5090 / Apple M3 Max / Raspberry Pi 5）を読み込んだ公開リストUI。デフォルトは希少性スコア順で、リーダーボードではなくShowcaseとして並ぶ。
 
 ```bash
 source .tools/git-env.sh   # Codexサンドボックス内でgitを使う場合
