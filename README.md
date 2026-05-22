@@ -42,6 +42,16 @@
 
 plain mode（基線）はTLS + ノードプロキシのログ非書き出し規約に依存します。subtext mode（任意）はそれに加えて、ノードのプロキシログに covertext しか残さないdefense-in-depthを足します。いずれにせよノード提供者がプロセス内部に踏み込めば平文を見られます。機密情報、個人情報、業務上守るべき内容は送らないでください。
 
+## 違法コンテンツへのゼロトレランスと通報導線
+
+児童性的搾取、テロ・大量暴力支援、その他違法な入力/出力は禁止しています。luckrigは3段構えで対応します。
+
+1. ノードプロキシのローカル正規表現フィルタ
+2. ノードプロキシの外部モデレーションフック（`LUCKRIG_MODERATION_ENDPOINT`、OpenAI Moderation互換、**到達不能時はfail-closed**）
+3. トラッカー側のNotice-and-Takedown：`POST /api/abuse/report`（誰でも通報可、IPレート制限、**自動banはしない**）／`POST /api/bans`（運営者がレビュー後に手動でban／`LUCKRIG_DEV=1`）
+
+Abuse contactは `GET /api/abuse-contact` で公開されます。詳細は SPEC.md §7.1b / §7.1c を参照。
+
 ## 最小実装の順序
 
 CONCEPT.md §「最小実装の順序」より：

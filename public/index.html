@@ -46,6 +46,11 @@
         ただし、ノード提供者がプロセス内部に踏み込めば平文を見られます。
         機密情報、個人情報、業務上守るべき内容は送らないでください。
       </section>
+      <section class="notice abuse-notice">
+        <strong>違法コンテンツへのゼロトレランス:</strong> 児童性的搾取、テロ・大量暴力支援、その他違法な入力/出力は禁止しています。
+        ノードプロキシは外部モデレーション（OpenAI互換）にも対応しており、トラッカーはNotice-and-Takedown方針で運用されます。
+        通報先: <a class="abuse-contact-link" href="#">読み込み中…</a>
+      </section>
 
       <section class="summary" id="summary" aria-live="polite"></section>
       <section class="compare" id="compare" aria-live="polite"></section>
@@ -137,6 +142,21 @@
           <p class="timing-upload-help">
             プロンプトとレスポンス本文は送信されません。tok/s・TTFT・キュー待ちなどのタイミング数値だけがトラッカーへ送られ、公開ノードリストの community_timing として p50 が集計されます。
           </p>
+        </details>
+        <details class="report-panel">
+          <summary>このノードを通報する</summary>
+          <label class="prompt-label">
+            <span>理由（必須・最大2000文字）</span>
+            <textarea class="report-reason" rows="3" placeholder="例: NSFW画像生成を行うnode、違法な出力を返す、虚偽のスペック申告 など"></textarea>
+          </label>
+          <label class="prompt-label">
+            <span>追加情報（任意・最大4000文字）</span>
+            <textarea class="report-evidence" rows="2" placeholder="該当URLやreplayファイルへの参照など。プロンプト本文は貼り付けないでください。"></textarea>
+          </label>
+          <div class="report-actions">
+            <button class="report-node" type="button">通報を送信 (auto-banは行いません)</button>
+            <span class="report-status"></span>
+          </div>
         </details>
         <footer class="health"></footer>
         <footer class="observations"></footer>

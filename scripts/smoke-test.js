@@ -55,12 +55,12 @@ async function main() {
   if (!html.includes('node public key fingerprint')) {
     throw new Error('index page did not include fingerprint UI marker');
   }
-  if (!html.includes('browser POC') || !html.includes('tasting-trust') || !html.includes('fingerprint-confirm') || !html.includes('verify-fingerprint-url') || !html.includes('model-filter') || !html.includes('showcase-badges') || !html.includes('contribution-panel') || !html.includes('tasting-mode') || !html.includes('upload-timing') || !html.includes('community-timing')) {
-    throw new Error('index page did not include browser tasting/trust/filter/mode/timing UI markers');
+  if (!html.includes('browser POC') || !html.includes('tasting-trust') || !html.includes('fingerprint-confirm') || !html.includes('verify-fingerprint-url') || !html.includes('model-filter') || !html.includes('showcase-badges') || !html.includes('contribution-panel') || !html.includes('tasting-mode') || !html.includes('upload-timing') || !html.includes('community-timing') || !html.includes('abuse-notice') || !html.includes('report-node') || !html.includes('違法コンテンツ')) {
+    throw new Error('index page did not include browser tasting/trust/filter/mode/timing/abuse UI markers');
   }
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  if (!app.includes('visible rigs comparison') || !app.includes('queue: ${queueLabel}') || !app.includes('luckrig.browserIdentity.v1') || !app.includes('/api/fingerprint/verify') || !app.includes('/api/replay/timing') || !app.includes('parsePlainSseText') || !app.includes('community_timing')) {
-    throw new Error('app did not include comparison/queue/mode/timing UI markers');
+  if (!app.includes('visible rigs comparison') || !app.includes('queue: ${queueLabel}') || !app.includes('luckrig.browserIdentity.v1') || !app.includes('/api/fingerprint/verify') || !app.includes('/api/replay/timing') || !app.includes('parsePlainSseText') || !app.includes('community_timing') || !app.includes('/api/abuse/report') || !app.includes('/api/abuse-contact')) {
+    throw new Error('app did not include comparison/queue/mode/timing/abuse UI markers');
   }
 
   console.log('[smoke] ok');

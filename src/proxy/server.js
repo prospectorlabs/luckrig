@@ -3,6 +3,7 @@ import { createServer as createMockUpstreamServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { assertPromptAllowed } from '../shared/filter.js';
+import { runModeration, moderationError } from '../shared/moderation.js';
 import { bearerToken, verifyTastingToken } from '../shared/token.js';
 import {
   decryptJsonFromSubtext,
@@ -19,6 +20,11 @@ const TRACKER_SECRET = process.env.LUCKRIG_TRACKER_SECRET ?? 'luckrig-dev-secret
 const UPSTREAM_URL = process.env.LUCKRIG_UPSTREAM_URL ?? '';
 const NODE_PRIVATE_KEY = process.env.LUCKRIG_NODE_PRIVATE_KEY ?? '';
 const MAX_ACTIVE_REQUESTS = Math.max(1, Number.parseInt(process.env.LUCKRIG_MAX_ACTIVE_REQUESTS ?? '1', 10));
+const MODERATION_ENDPOINT = process.env.LUCKRIG_MODERATION_ENDPOINT ?? '';
+const MODERATION_AUTH = process.env.LUCKRIG_MODERATION_AUTH ?? '';
+const MODERATION_MODEL = process.env.LUCKRIG_MODERATION_MODEL ?? 'omni-moderation-latest';
+const MODERATION_TIMEOUT_MS = Math.max(500, Number.parseInt(process.env.LUCKRIG_MODERATION_TIMEOUT_MS ?? '5000', 10));
+const MODERATE_OUTPUT = process.env.LUCKRIG_MODERATE_OUTPUT !== '0';
 
 const queueState = { active: 0, waiting: 0, max_active: MAX_ACTIVE_REQUESTS };
 const queueWaiters = [];
@@ -253,6 +259,12 @@ export async function processChatCompletion({
   fetchImpl = fetch,
   nowMs = Date.now(),
   nodePrivateKey = NODE_PRIVATE_KEY,
+  moderationEndpoint = MODERATION_ENDPOINT,
+  moderationAuth = MODERATION_AUTH,
+  moderationModel = MODERATION_MODEL,
+  moderationTimeoutMs = MODERATION_TIMEOUT_MS,
+  moderateOutput = MODERATE_OUTPUT,
+  moderationFetchImpl = null,
 } = {}) {
   const token = bearerToken(authHeader);
   if (!token) throw Object.assign(new Error('missing bearer token'), { statusCode: 401 });
@@ -277,6 +289,26 @@ export async function processChatCompletion({
 
   const promptPolicy = assertPromptAllowed(prompt);
 
+  // External moderation hook (input). The local regex filter above catches
+  // obvious patterns; the moderation endpoint, when configured, catches
+  // contextual and adversarial cases. If unreachable the call FAILS CLOSED.
+  const promptText = typeof prompt?.prompt === 'string' ? prompt.prompt : JSON.stringify(prompt);
+  const inputModeration = await runModeration({
+    text: promptText,
+    endpoint: moderationEndpoint,
+    authToken: moderationAuth,
+    model: moderationModel,
+    fetchImpl: moderationFetchImpl ?? fetchImpl,
+    timeoutMs: moderationTimeoutMs,
+  });
+  if (inputModeration.flagged) {
+    throw moderationError({
+      stage: 'input',
+      categories: inputModeration.categories,
+      reason: inputModeration.reason,
+    });
+  }
+
   const queuedAt = performance.now();
   await acquireQueueSlot();
   // Queue UX: wait for the node's available generation slot, then buffer upstream
@@ -289,6 +321,30 @@ export async function processChatCompletion({
     releaseQueueSlot();
   }
   const tiered = applyTierPolicy(upstream.text, tokenPayload);
+
+  // External moderation hook (output). Catches model jailbreaks that produce
+  // disallowed content even when the input was clean. Optional but on by
+  // default; can be disabled with LUCKRIG_MODERATE_OUTPUT=0 for low-latency
+  // setups where the operator trusts the model.
+  let outputModeration = { skipped: true, flagged: false, categories: [] };
+  if (moderateOutput) {
+    outputModeration = await runModeration({
+      text: tiered.text,
+      endpoint: moderationEndpoint,
+      authToken: moderationAuth,
+      model: moderationModel,
+      fetchImpl: moderationFetchImpl ?? fetchImpl,
+      timeoutMs: moderationTimeoutMs,
+    });
+    if (outputModeration.flagged) {
+      throw moderationError({
+        stage: 'output',
+        categories: outputModeration.categories,
+        reason: outputModeration.reason,
+      });
+    }
+  }
+
   const generationSec = (performance.now() - generationStartedAt) / 1000;
   const queueWaitSec = (generationStartedAt - queuedAt) / 1000;
 
@@ -297,6 +353,10 @@ export async function processChatCompletion({
     node_id: nodeId,
     prompt,
     prompt_policy: promptPolicy,
+    moderation: {
+      input: { checked: !inputModeration.skipped, flagged: inputModeration.flagged, categories: inputModeration.categories },
+      output: { checked: !outputModeration.skipped, flagged: outputModeration.flagged, categories: outputModeration.categories },
+    },
     response: tiered.text,
     model_name: body?.model ?? '',
     limited_output_truncated: tiered.limited,

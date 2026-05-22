@@ -27,6 +27,10 @@ LUCKRIG_DEV=1 npm run dev
 | `LUCKRIG_METRICS_PATH` | `data/metrics.jsonl` | health/telemetry JSONL mirror（runtime生成、git管理外） |
 | `LUCKRIG_TOKEN_USAGE_PATH` | `data/token-usage.jsonl` | token usage JSONL mirror（runtime生成、git管理外） |
 | `LUCKRIG_TIMING_PATH` | `data/timing.jsonl` | opt-in timing JSONL mirror（runtime生成、git管理外） |
+| `LUCKRIG_BANS_PATH` | `data/bans.jsonl` | bans JSONL mirror（runtime生成、git管理外） |
+| `LUCKRIG_ABUSE_REPORTS_PATH` | `data/abuse-reports.jsonl` | 通報JSONL mirror（runtime生成、git管理外） |
+| `LUCKRIG_ABUSE_CONTACT` | `mailto:abuse@example.invalid` | 公開する通報先（UI上にも表示される） |
+| `LUCKRIG_ABUSE_REPORT_IP_LIMIT_PER_DAY` | `10` | 通報endpointのIP単位/日上限 |
 | `LUCKRIG_DB_PATH` | `data/luckrig.sqlite` | SQLite DB（runtime生成、git管理外） |
 | `LUCKRIG_USE_SQLITE` | enabled | `0`でSQLiteを無効化 |
 | `LUCKRIG_LIMITED_TOKENS_PER_DAY` | `5` | limited tierの1日あたりtoken発行上限 |
@@ -208,6 +212,64 @@ node public key fingerprintを別経路URLから取得して照合します。
 
 受信したサンプルは `data/timing.jsonl` に append-only で記録し、ノード単位の p50 を集計します。`GET /api/nodes` の各ノードに `community_timing` として `samples_count` / `tok_per_sec_p50` / `ttft_ms_p50` / `last_uploaded_at` を含めて返します。
 
+### `GET /api/abuse-contact`
+
+通報先（mailto:またはURL）を返します。試食UIの違法コンテンツ通知ブロックがこれを取得して表示します。
+
+```json
+{ "schema_version": 1, "contact": "mailto:abuse@example.invalid" }
+```
+
+### `POST /api/abuse/report`
+
+通報を受け付けるエンドポイント。**自動banは行いません**。`data/abuse-reports.jsonl` に蓄積され、運営者の人間レビュー前提です。IP単位で1日あたり `LUCKRIG_ABUSE_REPORT_IP_LIMIT_PER_DAY` 件（既定10件）に制限されます。reporter IPはraw保存せず、tracker secretでHMACしたhash断片だけを残します。
+
+```json
+{
+  "subject_kind": "node_id",
+  "subject_id": "first-5090-qwen3",
+  "reason": "違反内容の説明（最大2000文字）",
+  "evidence": "URLや該当replayの参照（最大4000文字、任意）"
+}
+```
+
+成功時:
+
+```json
+{
+  "ok": true,
+  "schema_version": 1,
+  "report_id": "abcdef0123",
+  "stored_at": "2026-05-22T07:00:00.000Z",
+  "contact": "mailto:abuse@example.invalid",
+  "note": "Report queued for human review. No automatic ban or content takedown is performed."
+}
+```
+
+### `POST /api/bans`（dev-only）
+
+`LUCKRIG_DEV=1` のときだけ有効。通報を人間がレビューした後に運営者が手動でbanを適用するためのエンドポイントです。
+
+```json
+{
+  "kind": "node_id",
+  "value": "first-5090-qwen3",
+  "reason": "CSAM 生成への加担",
+  "expires_at": null
+}
+```
+
+効果:
+
+- `user_id` / `ip` ban → `POST /api/tokens` と `POST /api/replay/timing` が 403 で拒否される
+- `node_id` ban → 公開リストから除外、token発行は 404、`GET /api/nodes/:id` も 404
+
+banは `data/bans.jsonl` に append-only で永続化され、起動時に再読込されます。`expires_at` が過去なら無効として扱います。
+
+### `GET /api/bans`（dev-only）
+
+現在有効なbanの一覧を返します。
+
 レスポンス:
 
 ```json
@@ -273,3 +335,4 @@ curl -X POST http://127.0.0.1:8787/api/nodes \
 - この段階の `rarity_score` は公開リストの初期ソート用の簡易値。CONCEPT.mdの貢献スコアとは別物
 - ノードが落ちてもペナルティなし。`unavailable` 表示になるだけ
 - tok/sはここでは測らない。集計値は opt-in `POST /api/replay/timing` 経由のサンプルから算出する。ノード自己申告は一次ソースとして使わない。
+- モデレーションはノード側プロキシ（`LUCKRIG_MODERATION_ENDPOINT`）が担当する。trackerはban / 通報受付 / Abuse contact公開を担当する。

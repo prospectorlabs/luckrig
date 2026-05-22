@@ -307,6 +307,40 @@ dd { margin: 4px 0 0; font-weight: 650; overflow-wrap: anywhere; }
 }
 .timing-upload-status { color: var(--muted); font-size: 12px; }
 .timing-upload-help { color: var(--muted); font-size: 11px; margin-top: 6px; }
+
+.abuse-notice {
+  border-color: color-mix(in srgb, var(--warn) 50%, var(--line));
+  background: rgba(255, 107, 122, 0.05);
+}
+.abuse-notice .abuse-contact-link { color: var(--accent); }
+
+.report-panel {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.18);
+}
+.report-panel summary {
+  cursor: pointer;
+  color: var(--warn);
+  font-weight: 700;
+}
+.report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+.report-node {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.report-status {
+  color: var(--muted);
+  font-size: 12px;
+}
 .fingerprint-verify-actions {
   display: flex;
   flex-wrap: wrap;

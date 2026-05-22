@@ -568,6 +568,43 @@ Current evidence:
 - `CONCEPT.md` §フィルタリング方針
 - Basic prompt filter implemented in proxy; rules will need operational tuning
 
+#### US-9.3 — External moderation hook (proxy)
+
+As a **Node Provider**, I want my proxy to call an external moderation service (OpenAI Moderation API-compatible) on every input and (by default) every output, so that I have a concrete technical defense against hosting illegal content and a body of moderation logs to point to.
+
+Acceptance criteria:
+
+- `LUCKRIG_MODERATION_ENDPOINT` enables the hook. When unset, only the local regex filter applies.
+- Flagged input is rejected with HTTP 451 and the offending text is never echoed back.
+- The moderation endpoint being unreachable, returning non-2xx, or returning unparseable JSON is treated as `flagged=true` (fail-closed).
+- Output is moderated by default (`LUCKRIG_MODERATE_OUTPUT=1`), can be disabled per-deployment.
+- The response envelope carries a `moderation.{input,output}` summary that records `checked`, `flagged`, and `categories`.
+
+Current evidence:
+
+- `src/shared/moderation.js`
+- `processChatCompletion()` moderation branches in `src/proxy/server.js`
+- e2e flagged-input, unreachable-endpoint (fail-closed), and clean-pass cases in `scripts/e2e-test.js`
+
+#### US-9.4 — Notice-and-Takedown via abuse report and operator ban
+
+As a **Tracker Operator**, I want an open abuse-report endpoint (rate-limited, no auto-ban) plus a dev-only ban surface, so that I can run a credible Notice-and-Takedown policy without delegating bans to an untrusted internet.
+
+Acceptance criteria:
+
+- `POST /api/abuse/report` accepts a structured report, enforces an IP rate limit, and returns 202 with a `report_id`. The endpoint **never auto-bans**.
+- Reporter IP is HMAC-hashed (truncated) before persistence; raw IP is not stored.
+- `POST /api/bans` (gated by `LUCKRIG_DEV=1`) appends bans for `user_id` / `ip` / `node_id` to `data/bans.jsonl`.
+- Banned `user_id` or `ip` cause `POST /api/tokens` and `POST /api/replay/timing` to return 403.
+- Banned `node_id` is hidden from `GET /api/nodes` and `GET /api/nodes/:id`, and `POST /api/tokens` for that node returns 404.
+- `GET /api/abuse-contact` returns the operator's published abuse contact and the UI renders it in the abuse notice.
+
+Current evidence:
+
+- `appendBan()`, `checkBan()`, `assertNotBanned()`, `normalizeAbuseReport()`, `appendAbuseReport()` in `src/tracker/server.js`
+- Browser UI: `report-panel` with `report-node` button posting to `/api/abuse/report`; abuse contact loaded from `/api/abuse-contact`
+- e2e cases for: ban hiding a node, banned user 403 on token issuance, abuse-report accepted (202), bad subject_kind rejected (400), IP rate limit (429)
+
 ---
 
 ### E10. Hardening

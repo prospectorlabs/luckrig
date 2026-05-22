@@ -8,6 +8,10 @@ process.env.LUCKRIG_TRACKER_SECRET = process.env.LUCKRIG_TRACKER_SECRET ?? 'luck
 process.env.LUCKRIG_METRICS_PATH = process.env.LUCKRIG_METRICS_PATH ?? `/tmp/luckrig-e2e-metrics-${process.pid}.jsonl`;
 process.env.LUCKRIG_TOKEN_USAGE_PATH = process.env.LUCKRIG_TOKEN_USAGE_PATH ?? `/tmp/luckrig-e2e-token-usage-${process.pid}.jsonl`;
 process.env.LUCKRIG_DB_PATH = process.env.LUCKRIG_DB_PATH ?? `/tmp/luckrig-e2e-${process.pid}.sqlite`;
+process.env.LUCKRIG_TIMING_PATH = process.env.LUCKRIG_TIMING_PATH ?? `/tmp/luckrig-e2e-timing-${process.pid}.jsonl`;
+process.env.LUCKRIG_BANS_PATH = process.env.LUCKRIG_BANS_PATH ?? `/tmp/luckrig-e2e-bans-${process.pid}.jsonl`;
+process.env.LUCKRIG_ABUSE_REPORTS_PATH = process.env.LUCKRIG_ABUSE_REPORTS_PATH ?? `/tmp/luckrig-e2e-abuse-${process.pid}.jsonl`;
+process.env.LUCKRIG_DEV = process.env.LUCKRIG_DEV ?? '1';
 process.env.LUCKRIG_HEALTH_TIMEOUT_MS = process.env.LUCKRIG_HEALTH_TIMEOUT_MS ?? '200';
 
 const tracker = await import('../src/tracker/server.js');
@@ -416,6 +420,160 @@ async function main() {
   assert.ok(nodeAfter, 'node must be in public list');
   assert.ok(nodeAfter.community_timing, 'public node must expose community_timing');
   assert.equal(nodeAfter.community_timing.samples_count >= 1, true);
+
+  // ----- moderation hook (proxy input + output) -----
+
+  const flaggingFetch = async (url) => {
+    if (String(url).includes('/moderation/flag')) {
+      return {
+        ok: true,
+        async json() {
+          return { id: 'mock-mod-flag', results: [{ flagged: true, categories: { 'sexual/minors': true } }] };
+        },
+      };
+    }
+    return { ok: true, async json() { return { choices: [{ message: { content: 'ok' } }] } } };
+  };
+  const cleanFetch = async (url) => {
+    if (String(url).includes('/moderation/clean')) {
+      return {
+        ok: true,
+        async json() {
+          return { id: 'mock-mod-clean', results: [{ flagged: false, categories: {} }] };
+        },
+      };
+    }
+    return { ok: true, async json() { return { choices: [{ message: { content: 'ok' } }] } } };
+  };
+  const unreachableFetch = async () => { throw new Error('ECONNREFUSED'); };
+
+  const modTokenRes = await requestTracker({
+    method: 'POST',
+    url: '/api/tokens',
+    headers: { 'content-type': 'application/json' },
+    body: { node_id: node.id, user_id: 'mod-e2e', contribution_score: 1, ttl_sec: 60 },
+  });
+  assert.equal(modTokenRes.statusCode, 201, modTokenRes.text);
+  const modBody = buildPlainChatBody({ prompt: 'innocuous prompt', stream: true });
+
+  // Input flagged → 451
+  await assert.rejects(
+    () => processChatCompletion({
+      body: modBody,
+      authHeader: `Bearer ${modTokenRes.json.token}`,
+      nodeId: node.id,
+      trackerSecret: process.env.LUCKRIG_TRACKER_SECRET,
+      moderationEndpoint: 'http://mod.test/moderation/flag',
+      moderationFetchImpl: flaggingFetch,
+      moderateOutput: false,
+    }),
+    (error) => error.statusCode === 451 && /moderation blocked input/.test(error.message),
+    'flagged input must throw moderation 451',
+  );
+
+  // Unreachable moderation → fail closed (also 451)
+  await assert.rejects(
+    () => processChatCompletion({
+      body: modBody,
+      authHeader: `Bearer ${modTokenRes.json.token}`,
+      nodeId: node.id,
+      trackerSecret: process.env.LUCKRIG_TRACKER_SECRET,
+      moderationEndpoint: 'http://mod.test/moderation/down',
+      moderationFetchImpl: unreachableFetch,
+    }),
+    (error) => error.statusCode === 451 && /moderation-unreachable/.test(error.message),
+    'unreachable moderation must fail closed',
+  );
+
+  // Clean moderation → request succeeds, response envelope carries moderation report
+  const cleanResult = await processChatCompletion({
+    body: modBody,
+    authHeader: `Bearer ${modTokenRes.json.token}`,
+    nodeId: node.id,
+    trackerSecret: process.env.LUCKRIG_TRACKER_SECRET,
+    moderationEndpoint: 'http://mod.test/moderation/clean',
+    moderationFetchImpl: cleanFetch,
+    moderateOutput: true,
+  });
+  assert.equal(cleanResult.kind, 'plain-sse');
+  assert.equal(cleanResult.response_envelope.moderation.input.checked, true);
+  assert.equal(cleanResult.response_envelope.moderation.input.flagged, false);
+  assert.equal(cleanResult.response_envelope.moderation.output.checked, true);
+
+  // ----- bans (CONCEPT §ノード提供者保護 / takedown) -----
+
+  await tracker.appendBan({ kind: 'user_id', value: 'banned-e2e-user', reason: 'e2e ban test' });
+  const bannedTokenRes = await requestTracker({
+    method: 'POST',
+    url: '/api/tokens',
+    headers: { 'content-type': 'application/json' },
+    body: { node_id: node.id, user_id: 'banned-e2e-user', contribution_score: 1, ttl_sec: 60 },
+  });
+  assert.equal(bannedTokenRes.statusCode, 403, bannedTokenRes.text);
+  assert.match(bannedTokenRes.json.error, /blocked by user_id ban/);
+
+  // Ban a node → it disappears from /api/nodes and tokens for it return 404
+  await tracker.appendBan({ kind: 'node_id', value: node.id, reason: 'e2e ban test (node)' });
+  const nodesAfterBan = await requestTracker({ method: 'GET', url: '/api/nodes' });
+  assert.ok(nodesAfterBan.json.nodes.every((n) => n.id !== node.id), 'banned node must be hidden from /api/nodes');
+  const tokenForBannedNode = await requestTracker({
+    method: 'POST',
+    url: '/api/tokens',
+    headers: { 'content-type': 'application/json' },
+    body: { node_id: node.id, user_id: 'someone-else', contribution_score: 1, ttl_sec: 60 },
+  });
+  assert.equal(tokenForBannedNode.statusCode, 404, tokenForBannedNode.text);
+
+  // Lift the node ban so abuse-report test below targets a known-good node.
+  tracker.banSets.node_id.delete(node.id);
+
+  // ----- abuse reports (queued, never auto-ban) -----
+
+  const reportRes = await requestTracker({
+    method: 'POST',
+    url: '/api/abuse/report',
+    headers: { 'content-type': 'application/json' },
+    body: {
+      subject_kind: 'node_id',
+      subject_id: node.id,
+      reason: 'e2e abuse report',
+      evidence: 'no body or chunk timestamps attached',
+    },
+  });
+  assert.equal(reportRes.statusCode, 202, reportRes.text);
+  assert.ok(reportRes.json.report_id);
+  assert.match(reportRes.json.note, /human review/);
+  assert.equal(typeof reportRes.json.contact, 'string');
+
+  // Bad subject_kind → 400
+  const badReport = await requestTracker({
+    method: 'POST',
+    url: '/api/abuse/report',
+    headers: { 'content-type': 'application/json' },
+    body: { subject_kind: 'invalid', subject_id: 'x', reason: 'r' },
+  });
+  assert.equal(badReport.statusCode, 400, badReport.text);
+
+  // Abuse-report IP rate limit
+  tracker.abuseReportIpUsageDaily.set(`${new Date().toISOString().slice(0, 10)}::local`, tracker.ABUSE_REPORT_IP_LIMIT_PER_DAY);
+  const rateLimited = await requestTracker({
+    method: 'POST',
+    url: '/api/abuse/report',
+    headers: { 'content-type': 'application/json' },
+    body: { subject_kind: 'node_id', subject_id: node.id, reason: 'r' },
+  });
+  assert.equal(rateLimited.statusCode, 429, rateLimited.text);
+  tracker.abuseReportIpUsageDaily.clear();
+
+  // Dev-only /api/bans listing must include both bans we appended.
+  const banList = await requestTracker({ method: 'GET', url: '/api/bans' });
+  assert.equal(banList.statusCode, 200, banList.text);
+  assert.ok(banList.json.bans.some((b) => b.kind === 'user_id' && b.value === 'banned-e2e-user'));
+
+  // Abuse-contact endpoint must reveal a contact string (mailto:... default).
+  const contactRes = await requestTracker({ method: 'GET', url: '/api/abuse-contact' });
+  assert.equal(contactRes.statusCode, 200, contactRes.text);
+  assert.equal(typeof contactRes.json.contact, 'string');
 
   console.log('[e2e] ok');
   console.log(`[e2e] node=${node.id}`);

@@ -69,6 +69,16 @@ luckrigのプライバシー設計は「頑張らなければ見えない」で�
 
 plain mode はTLS + ノードプロキシのログ非書き出し規約に依存します。subtext (public-key) はその上に「ノードのプロキシログに covertext しか残らない」defense-in-depth を足します。UI ではfingerprint表示・コピー・URL照合を任意の自己検証として提供します。さらに強い運用をする場合は、GitHub等の別経路でfingerprintを公開してください。
 
+### 2.4 違法コンテンツ／モデレーション／通報
+
+luckrigは「素朴な検知 + 第三者モデレータ + Notice-and-Takedown」の3段で違法コンテンツに対処します。
+
+- ノードプロキシのローカル正規表現フィルタ（`src/shared/filter.js`）は常時有効
+- `LUCKRIG_MODERATION_ENDPOINT` を設定すると、入力と（既定で）出力を外部モデレーション（OpenAI Moderation API互換）に投げる。到達不能や失敗は**fail-closed**で 451 を返す
+- 利用者は `POST /api/abuse/report` で通報できる。**自動banはしない**（誤通報の巻き込みを避けるため）
+- 運営者は `POST /api/bans`（`LUCKRIG_DEV=1`）で `user_id` / `ip` / `node_id` を手動でban。banされた node はリストから消え、token発行も拒否される
+- 通報先は `LUCKRIG_ABUSE_CONTACT` で公開される（UIにも表示）
+
 ---
 
 ## 3. 必要条件
@@ -243,6 +253,11 @@ http://127.0.0.1:8787/
 | `LUCKRIG_USE_SQLITE` | enabled | `0`でSQLiteを無効化 |
 | `LUCKRIG_HEALTH_INTERVAL_MS` | `30000` | health probe間隔 |
 | `LUCKRIG_HEALTH_TIMEOUT_MS` | `2000` | health probe timeout |
+| `LUCKRIG_TIMING_PATH` | `data/timing.jsonl` | opt-in timing集計のJSONL mirror |
+| `LUCKRIG_BANS_PATH` | `data/bans.jsonl` | bans (user_id/ip/node_id) のJSONL mirror |
+| `LUCKRIG_ABUSE_REPORTS_PATH` | `data/abuse-reports.jsonl` | 通報のJSONL mirror |
+| `LUCKRIG_ABUSE_CONTACT` | `mailto:abuse@example.invalid` | UIに表示する通報先 |
+| `LUCKRIG_ABUSE_REPORT_IP_LIMIT_PER_DAY` | `10` | 通報endpointのIP単位/日上限 |
 
 ---
 
@@ -329,6 +344,11 @@ POST /chat/completions
 | `LUCKRIG_LIMITED_TOKENS_PER_DAY` | `5` | limited tierの1日あたりtoken発行上限 |
 | `LUCKRIG_TOKEN_USAGE_RETENTION_DAYS` | `7` | token使用量のメモリ保持日数（自動purge） |
 | `LUCKRIG_TOKEN_IP_LIMIT_PER_DAY` | `100` | IP単位の1日あたりtoken発行上限 |
+| `LUCKRIG_MODERATION_ENDPOINT` | unset | 設定すると外部モデレーション（OpenAI Moderation互換）を呼ぶ。未設定ならローカル正規表現フィルタのみ |
+| `LUCKRIG_MODERATION_AUTH` | unset | モデレーションエンドポイント用のBearer token（必要なら） |
+| `LUCKRIG_MODERATION_MODEL` | `omni-moderation-latest` | モデレーションエンドポイントに渡すmodel名 |
+| `LUCKRIG_MODERATION_TIMEOUT_MS` | `5000` | モデレーション呼び出しのtimeout（ミリ秒）。**到達不能や失敗はfail-closed = 451** |
+| `LUCKRIG_MODERATE_OUTPUT` | `1` | `0`にすると出力側のモデレーションをスキップ（入力側は常に実行） |
 
 ---
 

@@ -51,6 +51,9 @@ tracker
 - Buffered generation with pseudo SSE playback (subtext mode only)
 - Local replay persistence
 - Opt-in timing-metadata upload from client to tracker (no prompt / response body)
+- Local regex prompt filter + opt-in external moderation hook (OpenAI Moderation API-compatible) with fail-closed behavior on input and (default-on) on output
+- Notice-and-Takedown: abuse-report endpoint (queued for human review, rate-limited per IP, no auto-ban), dev-only ban management for `user_id` / `ip` / `node_id` with JSONL persistence, banned nodes hidden from public list and refused token issuance
+- Published Abuse contact via `GET /api/abuse-contact` and visible in the UI
 
 ### 2.2 Out of scope for v1
 
@@ -599,6 +602,56 @@ Privacy guarantees:
 - The endpoint rejects any oversized body and any non-allowlisted field as a defense against accidental upload of prompt or response body.
 - Aggregates are exposed; raw per-upload rows are not exposed via public APIs.
 
+### 6.13 Abuse contact
+
+```http
+GET /api/abuse-contact
+```
+
+Returns the operator-published abuse contact (default placeholder: `mailto:abuse@example.invalid`). The browser UI fetches this and renders it in the abuse notice block.
+
+### 6.14 Abuse report (queued for human review, no auto-ban)
+
+```http
+POST /api/abuse/report
+Content-Type: application/json
+
+{
+  "subject_kind": "node_id" | "user_id" | "content_id" | "other",
+  "subject_id": "<opaque identifier of the thing being reported>",
+  "reason": "<= 2000 chars",
+  "evidence": "<= 4000 chars (optional)"
+}
+```
+
+Behavior:
+
+1. Validate `subject_kind` against the allowlist; reject otherwise (400).
+2. Apply IP rate limit (`LUCKRIG_ABUSE_REPORT_IP_LIMIT_PER_DAY`, default 10).
+3. Hash the reporter IP with the tracker secret (truncated HMAC) before persisting; never store the raw IP.
+4. Append to `data/abuse-reports.jsonl` with a generated `report_id`.
+5. Respond `202 Accepted` with `{ report_id, contact, note }`. **No automatic ban is performed.**
+
+### 6.15 Bans (dev-only management)
+
+`POST /api/bans` and `GET /api/bans` are enabled only when `LUCKRIG_DEV=1`. The operator manually appends bans after reviewing abuse reports.
+
+```http
+POST /api/bans
+{
+  "kind": "user_id" | "ip" | "node_id",
+  "value": "<exact match>",
+  "reason": "<= 280 chars",
+  "expires_at": "ISO-8601 or null"
+}
+```
+
+Effect:
+
+- `user_id` and `ip` bans cause `POST /api/tokens` and `POST /api/replay/timing` to reject with 403.
+- `node_id` bans hide the node from `GET /api/nodes` and `GET /api/nodes/:id`, and refuse `POST /api/tokens` for that node with 404.
+- Bans are persisted to `data/bans.jsonl` and loaded at startup. Expired bans (when `expires_at` is set and past) are skipped on load and pruned on lookup.
+
 ---
 
 ## 7. Security and Privacy Model
@@ -606,6 +659,22 @@ Privacy guarantees:
 ### 7.1 Intended protection
 
 subtext + AES-GCM is intended as an operational privacy courtesy: plaintext prompt / response should not appear in ordinary network capture or naive logs. It is not the main product promise, and users must not send secrets.
+
+### 7.1b Content moderation (proxy)
+
+The proxy supports an external moderation hook (`LUCKRIG_MODERATION_ENDPOINT`) compatible with the OpenAI Moderation API.
+
+- Input is moderated before the prompt is forwarded to upstream.
+- Output is moderated by default before being returned to the client (`LUCKRIG_MODERATE_OUTPUT=0` to disable).
+- Network / HTTP / parse failures of the moderation endpoint result in `flagged=true, hard_fail=true` — the request is **rejected with HTTP 451**, not silently passed through.
+- A moderation summary is included in the response envelope: `moderation.input.{checked,flagged,categories}` and `moderation.output.{checked,flagged,categories}`. The plaintext prompt and response are never sent back via this summary.
+- The local regex filter (`src/shared/filter.js`) continues to run before the external hook as a fast first line.
+
+luckrig does not claim safety. It claims: "every request is locally pattern-filtered, externally moderated when the operator configures a moderation endpoint, and bannable by the operator after the fact."
+
+### 7.1c Tracker ban / takedown
+
+The tracker maintains a persisted ban list (`data/bans.jsonl`) keyed by `user_id`, `ip`, and `node_id`. The `POST /api/abuse/report` endpoint is open to all clients (rate-limited per IP and never stores raw IPs); it queues reports for human review. The actual ban action is dev-only (`POST /api/bans`), which makes the human-review step explicit and prevents weaponized self-service banning.
 
 ### 7.2 Explicit limits
 
@@ -900,5 +969,9 @@ The current POC is considered valid when all of the following hold:
 - Replay record can be saved and loaded.
 - Client can opt-in upload timing-only metadata to tracker (no prompt / response body), and the tracker rejects any disallowed field.
 - Public node list surfaces community-aggregated tok/s when timing uploads exist.
+- Proxy moderation hook rejects flagged input (451) and falls closed when the moderation endpoint is unreachable.
+- Tracker honors `user_id` / `ip` / `node_id` bans: banned subjects are refused token issuance (403 or 404 for node bans) and banned nodes are hidden from the public list.
+- Abuse-report endpoint accepts a well-formed report (202), rejects unknown `subject_kind` (400), and enforces an IP rate limit (429).
+- `GET /api/abuse-contact` returns the operator-published abuse contact string.
 - Invalid token is rejected.
 - Docs and UI require a privacy caveat acknowledgement, display optional fingerprint self-checks, and clearly state remaining trust limits.

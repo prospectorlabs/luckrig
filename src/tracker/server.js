@@ -3,7 +3,7 @@ import { appendFile, mkdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes, createHmac } from 'node:crypto';
 import { verifyFingerprintText } from '../shared/fingerprint.js';
 import { publicKeyFingerprint } from '../shared/keyhandshake.js';
 import { issueTastingToken } from '../shared/token.js';
@@ -19,6 +19,10 @@ const REGISTRY_PATH = path.resolve(ROOT, process.env.LUCKRIG_REGISTRY_PATH ?? 'd
 const METRICS_PATH = path.resolve(ROOT, process.env.LUCKRIG_METRICS_PATH ?? 'data/metrics.jsonl');
 const TOKEN_USAGE_PATH = path.resolve(ROOT, process.env.LUCKRIG_TOKEN_USAGE_PATH ?? 'data/token-usage.jsonl');
 const TIMING_PATH = path.resolve(ROOT, process.env.LUCKRIG_TIMING_PATH ?? 'data/timing.jsonl');
+const BANS_PATH = path.resolve(ROOT, process.env.LUCKRIG_BANS_PATH ?? 'data/bans.jsonl');
+const ABUSE_REPORTS_PATH = path.resolve(ROOT, process.env.LUCKRIG_ABUSE_REPORTS_PATH ?? 'data/abuse-reports.jsonl');
+const ABUSE_CONTACT = process.env.LUCKRIG_ABUSE_CONTACT ?? 'mailto:abuse@example.invalid';
+const ABUSE_REPORT_IP_LIMIT_PER_DAY = Math.max(1, Number.parseInt(process.env.LUCKRIG_ABUSE_REPORT_IP_LIMIT_PER_DAY ?? '10', 10));
 const DB_PATH = path.resolve(ROOT, process.env.LUCKRIG_DB_PATH ?? 'data/luckrig.sqlite');
 const USE_SQLITE = process.env.LUCKRIG_USE_SQLITE !== '0';
 const HEALTH_INTERVAL_MS = Number.parseInt(process.env.LUCKRIG_HEALTH_INTERVAL_MS ?? '30000', 10);
@@ -564,6 +568,189 @@ async function loadTiming() {
   }
 }
 
+// ----- bans (CONCEPT §ノード提供者保護 / takedown) -----
+//
+// Bans are an operator-side takedown mechanism. Three kinds are supported:
+//   - user_id  : block API surface for a tasting user
+//   - ip       : block API surface for a source IP
+//   - node_id  : hide a node from the public list and refuse token issuance
+// The intent is to give the tracker operator a "Notice and Takedown" lever so
+// that the operator's plain-vanilla intermediary-liability defense is not
+// undermined by a single bad listing. Bans are persisted to JSONL and loaded
+// at startup. There is no auto-ban: abuse reports queue for human review.
+
+const banSets = { user_id: new Map(), ip: new Map(), node_id: new Map() };
+
+function isBanExpired(entry, now = new Date()) {
+  if (!entry?.expires_at) return false;
+  const ts = Date.parse(entry.expires_at);
+  if (!Number.isFinite(ts)) return false;
+  return ts <= now.getTime();
+}
+
+function applyBanEntry(entry) {
+  if (!entry || typeof entry !== 'object') return false;
+  const kind = entry.kind;
+  if (!['user_id', 'ip', 'node_id'].includes(kind)) return false;
+  const value = typeof entry.value === 'string' ? entry.value.trim() : '';
+  if (!value) return false;
+  if (isBanExpired(entry)) return false;
+  banSets[kind].set(value, {
+    kind,
+    value,
+    reason: typeof entry.reason === 'string' ? entry.reason.slice(0, 280) : '',
+    created_at: typeof entry.created_at === 'string' ? entry.created_at : nowIso(),
+    expires_at: typeof entry.expires_at === 'string' ? entry.expires_at : null,
+  });
+  return true;
+}
+
+async function loadBans() {
+  for (const set of Object.values(banSets)) set.clear();
+  let raw;
+  try {
+    raw = await readFile(BANS_PATH, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      applyBanEntry(JSON.parse(line));
+    } catch {
+      // Skip malformed lines.
+    }
+  }
+}
+
+async function appendBan({ kind, value, reason = '', expires_at = null } = {}) {
+  if (!['user_id', 'ip', 'node_id'].includes(kind)) {
+    throw Object.assign(new Error(`unsupported ban kind: ${kind}`), { statusCode: 400 });
+  }
+  if (typeof value !== 'string' || !value.trim()) {
+    throw Object.assign(new Error('ban value is required'), { statusCode: 400 });
+  }
+  const entry = {
+    schema_version: 1,
+    kind,
+    value: value.trim(),
+    reason: String(reason ?? '').slice(0, 280),
+    created_at: nowIso(),
+    expires_at: typeof expires_at === 'string' ? expires_at : null,
+  };
+  applyBanEntry(entry);
+  try {
+    await mkdir(path.dirname(BANS_PATH), { recursive: true });
+    await appendFile(BANS_PATH, `${JSON.stringify(entry)}\n`, 'utf8');
+  } catch (error) {
+    console.error('[tracker] failed to append ban', error);
+  }
+  return entry;
+}
+
+function checkBan({ user_id, ip, node_id } = {}) {
+  for (const [kind, lookup] of [['user_id', user_id], ['ip', ip], ['node_id', node_id]]) {
+    if (!lookup) continue;
+    const entry = banSets[kind].get(lookup);
+    if (!entry) continue;
+    if (isBanExpired(entry)) {
+      banSets[kind].delete(lookup);
+      continue;
+    }
+    return entry;
+  }
+  return null;
+}
+
+function listBans() {
+  const out = [];
+  for (const set of Object.values(banSets)) {
+    for (const entry of set.values()) {
+      if (!isBanExpired(entry)) out.push(entry);
+    }
+  }
+  return out;
+}
+
+function assertNotBanned({ user_id, ip, node_id, kind = 'request' } = {}) {
+  const entry = checkBan({ user_id, ip, node_id });
+  if (!entry) return null;
+  const error = new Error(`${kind} blocked by ${entry.kind} ban: ${entry.reason || 'no reason supplied'}`);
+  error.statusCode = 403;
+  error.ban = { kind: entry.kind, value: entry.value, reason: entry.reason };
+  throw error;
+}
+
+// ----- abuse reports (queued for human review; do not auto-ban) -----
+
+const ABUSE_REPORT_ALLOWED_SUBJECT_KINDS = new Set(['node_id', 'user_id', 'content_id', 'other']);
+const ABUSE_REPORT_MAX_BYTES = 8 * 1024;
+const abuseReportIpUsageDaily = new Map();
+
+function assertAbuseReportIpRate(req) {
+  const ip = clientIpFromReq(req);
+  const key = ipUsageKey({ ip });
+  const used = abuseReportIpUsageDaily.get(key) ?? 0;
+  if (used >= ABUSE_REPORT_IP_LIMIT_PER_DAY) {
+    const error = new Error(`abuse-report IP rate limit exceeded for today (${used}/${ABUSE_REPORT_IP_LIMIT_PER_DAY})`);
+    error.statusCode = 429;
+    throw error;
+  }
+  return { ip, used, limit: ABUSE_REPORT_IP_LIMIT_PER_DAY, key };
+}
+
+function recordAbuseReportIpUsage(rate) {
+  abuseReportIpUsageDaily.set(rate.key, (abuseReportIpUsageDaily.get(rate.key) ?? 0) + 1);
+}
+
+function normalizeAbuseReport(input, { ip, maxBytes = ABUSE_REPORT_MAX_BYTES } = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw Object.assign(new Error('abuse report must be a JSON object'), { statusCode: 400 });
+  }
+  const raw = JSON.stringify(input);
+  if (raw.length > maxBytes) {
+    throw Object.assign(new Error('abuse report exceeds size budget'), { statusCode: 413 });
+  }
+  const subjectKind = String(input.subject_kind ?? input.subjectKind ?? '').toLowerCase();
+  if (!ABUSE_REPORT_ALLOWED_SUBJECT_KINDS.has(subjectKind)) {
+    throw Object.assign(new Error(`unsupported subject_kind: ${subjectKind}`), { statusCode: 400 });
+  }
+  const subjectId = typeof input.subject_id === 'string' ? input.subject_id.slice(0, 200) : '';
+  if (!subjectId) {
+    throw Object.assign(new Error('subject_id is required'), { statusCode: 400 });
+  }
+  const reason = typeof input.reason === 'string' ? input.reason.slice(0, 2000) : '';
+  const evidence = typeof input.evidence === 'string' ? input.evidence.slice(0, 4000) : '';
+  return {
+    schema_version: 1,
+    report_id: randomBytes(8).toString('base64url'),
+    subject_kind: subjectKind,
+    subject_id: subjectId,
+    reason,
+    evidence,
+    reporter_ip_hash: ip ? hashIp(ip) : null,
+    created_at: nowIso(),
+  };
+}
+
+function hashIp(ip) {
+  // We avoid storing raw reporter IPs to limit our liability and to protect
+  // reporter privacy. A salted hash is good enough for de-duplication and
+  // rate-limit forensics without becoming a personal-data ledger.
+  const salt = TRACKER_SECRET || 'luckrig-bans';
+  return createHmac('sha256', salt).update(String(ip)).digest('base64url').slice(0, 16);
+}
+
+async function appendAbuseReport(report) {
+  try {
+    await mkdir(path.dirname(ABUSE_REPORTS_PATH), { recursive: true });
+    await appendFile(ABUSE_REPORTS_PATH, `${JSON.stringify(report)}\n`, 'utf8');
+  } catch (error) {
+    console.error('[tracker] failed to append abuse report', error);
+  }
+}
+
 function contributionStatus({ userId = 'anonymous', contributionScore = 0 } = {}) {
   const score = asOptionalNumber(contributionScore, 0) ?? 0;
   const tier = score >= FULL_ACCESS_SCORE_THRESHOLD ? 'contributor' : 'limited';
@@ -913,7 +1100,9 @@ function computeShowcases() {
 
 function listPublicNodes({ status } = {}) {
   const scores = computeRarityScores();
-  let list = [...nodes.values()].map((node) => publicNode(node, scores.get(node.id) ?? 0));
+  let list = [...nodes.values()]
+    .filter((node) => !banSets.node_id.has(node.id))
+    .map((node) => publicNode(node, scores.get(node.id) ?? 0));
 
   if (status && status !== 'all') {
     list = list.filter((node) => node.health.status === status);
@@ -1086,6 +1275,7 @@ async function handleApi(req, res, url) {
       dev_writes_enabled: DEV_WRITES_ENABLED,
       full_access_score_threshold: FULL_ACCESS_SCORE_THRESHOLD,
       limited_tokens_per_day: LIMITED_TOKENS_PER_DAY,
+      abuse_contact: ABUSE_CONTACT,
       now: nowIso(),
     }, corsHeaders());
     return;
@@ -1116,13 +1306,22 @@ async function handleApi(req, res, url) {
   if (url.pathname === '/api/tokens' && req.method === 'POST') {
     const body = await readJsonBody(req);
     const nodeId = asOptionalString(body.node_id ?? body.nodeId);
-    if (!nodeId || !nodes.has(nodeId)) {
+    if (!nodeId || !nodes.has(nodeId) || banSets.node_id.has(nodeId)) {
       json(res, 404, { error: 'node not found' }, corsHeaders());
+      return;
+    }
+    // Refuse tokens for banned subjects before they consume any quota.
+    const requesterIp = clientIpFromReq(req);
+    const requestedUserId = asOptionalString(body.user_id ?? body.userId, 'anonymous');
+    try {
+      assertNotBanned({ user_id: requestedUserId, ip: requesterIp, node_id: nodeId, kind: 'token issuance' });
+    } catch (error) {
+      json(res, error.statusCode ?? 403, { error: String(error.message), ban: error.ban ?? null }, corsHeaders());
       return;
     }
     const ipRate = assertIpTokenRate(req);
     const status = contributionStatus({
-      userId: asOptionalString(body.user_id ?? body.userId, 'anonymous'),
+      userId: requestedUserId,
       contributionScore: body.contribution_score ?? body.contributionScore ?? 0,
     });
     const quota = assertTokenQuota(status);
@@ -1246,6 +1445,14 @@ async function handleApi(req, res, url) {
       json(res, error?.statusCode ?? 400, { error: String(error?.message ?? error) }, corsHeaders());
       return;
     }
+    // Ban check: a banned user or IP must not be able to write into the
+    // aggregate the tracker publishes to everyone else.
+    try {
+      assertNotBanned({ user_id: sample.user_id, ip: clientIpFromReq(req), node_id: sample.node_id, kind: 'timing upload' });
+    } catch (error) {
+      json(res, error.statusCode ?? 403, { error: String(error.message), ban: error.ban ?? null }, corsHeaders());
+      return;
+    }
     await appendTimingSample(sample);
     json(res, 201, {
       ok: true,
@@ -1254,6 +1461,81 @@ async function handleApi(req, res, url) {
       stored_at: sample.stored_at,
       community_timing: getCommunityTiming(sample.node_id),
     }, corsHeaders());
+    return;
+  }
+
+  if (url.pathname === '/api/abuse-contact' && req.method === 'GET') {
+    json(res, 200, { schema_version: 1, contact: ABUSE_CONTACT }, corsHeaders());
+    return;
+  }
+
+  if (url.pathname === '/api/abuse/report' && req.method === 'POST') {
+    let raw;
+    try {
+      raw = await readJsonBody(req, ABUSE_REPORT_MAX_BYTES);
+    } catch (error) {
+      json(res, error?.statusCode ?? 400, { error: String(error?.message ?? error) }, corsHeaders());
+      return;
+    }
+    let rate;
+    try {
+      rate = assertAbuseReportIpRate(req);
+    } catch (error) {
+      json(res, error.statusCode ?? 429, { error: String(error.message) }, corsHeaders());
+      return;
+    }
+    let report;
+    try {
+      report = normalizeAbuseReport(raw, { ip: rate.ip });
+    } catch (error) {
+      json(res, error?.statusCode ?? 400, { error: String(error?.message ?? error) }, corsHeaders());
+      return;
+    }
+    await appendAbuseReport(report);
+    recordAbuseReportIpUsage(rate);
+    json(res, 202, {
+      ok: true,
+      schema_version: 1,
+      report_id: report.report_id,
+      stored_at: report.created_at,
+      contact: ABUSE_CONTACT,
+      note: 'Report queued for human review. No automatic ban or content takedown is performed.',
+    }, corsHeaders());
+    return;
+  }
+
+  if (url.pathname === '/api/bans' && req.method === 'GET') {
+    if (!DEV_WRITES_ENABLED) {
+      json(res, 403, { error: 'GET /api/bans is dev-only (set LUCKRIG_DEV=1)' }, corsHeaders());
+      return;
+    }
+    json(res, 200, { schema_version: 1, bans: listBans() }, corsHeaders());
+    return;
+  }
+
+  if (url.pathname === '/api/bans' && req.method === 'POST') {
+    if (!DEV_WRITES_ENABLED) {
+      json(res, 403, { error: 'POST /api/bans is dev-only (set LUCKRIG_DEV=1)' }, corsHeaders());
+      return;
+    }
+    let raw;
+    try {
+      raw = await readJsonBody(req);
+    } catch (error) {
+      json(res, error?.statusCode ?? 400, { error: String(error?.message ?? error) }, corsHeaders());
+      return;
+    }
+    try {
+      const entry = await appendBan({
+        kind: typeof raw.kind === 'string' ? raw.kind : '',
+        value: typeof raw.value === 'string' ? raw.value : '',
+        reason: typeof raw.reason === 'string' ? raw.reason : '',
+        expires_at: typeof raw.expires_at === 'string' ? raw.expires_at : null,
+      });
+      json(res, 201, { schema_version: 1, ban: entry }, corsHeaders());
+    } catch (error) {
+      json(res, error?.statusCode ?? 400, { error: String(error?.message ?? error) }, corsHeaders());
+    }
     return;
   }
 
@@ -1272,7 +1554,7 @@ async function handleApi(req, res, url) {
   if (nodeMatch && req.method === 'GET') {
     const id = nodeMatch[1];
     const node = nodes.get(id);
-    if (!node) {
+    if (!node || banSets.node_id.has(id)) {
       json(res, 404, { error: 'node not found' }, corsHeaders());
       return;
     }
@@ -1330,6 +1612,7 @@ async function main() {
   await loadMetrics();
   await loadTokenUsage();
   await loadTiming();
+  await loadBans();
   setInterval(() => { pruneTokenUsageMap(); pruneIpUsageMap(); }, 60 * 60 * 1000).unref();
   await probeAllNodes();
   setInterval(() => {
@@ -1358,6 +1641,10 @@ export {
   METRICS_PATH,
   TOKEN_USAGE_PATH,
   TIMING_PATH,
+  BANS_PATH,
+  ABUSE_REPORTS_PATH,
+  ABUSE_CONTACT,
+  ABUSE_REPORT_IP_LIMIT_PER_DAY,
   DB_PATH,
   REGISTRY_PATH,
   computeNodeContributionScores,
@@ -1382,6 +1669,13 @@ export {
   validateTimingPayload,
   getCommunityTiming,
   timingByNode,
+  loadBans,
+  appendBan,
+  listBans,
+  checkBan,
+  banSets,
+  abuseReportIpUsageDaily,
+  normalizeAbuseReport,
   loadRegistry,
   normalizeNode,
   probeAllNodes,

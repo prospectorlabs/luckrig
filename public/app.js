@@ -776,6 +776,41 @@ function renderNode(node) {
     });
   }
 
+  const reportBtn = fragment.querySelector('.report-node');
+  const reportStatus = fragment.querySelector('.report-status');
+  const reportReason = fragment.querySelector('.report-reason');
+  const reportEvidence = fragment.querySelector('.report-evidence');
+  if (reportBtn) {
+    reportBtn.addEventListener('click', async () => {
+      const reason = (reportReason?.value ?? '').trim();
+      if (!reason) {
+        if (reportStatus) reportStatus.textContent = 'reason is required';
+        return;
+      }
+      reportBtn.disabled = true;
+      if (reportStatus) reportStatus.textContent = 'submitting report (no body / no IP raw stored)...';
+      try {
+        const res = await fetch('/api/abuse/report', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            subject_kind: 'node_id',
+            subject_id: node.id,
+            reason: reason.slice(0, 2000),
+            evidence: (reportEvidence?.value ?? '').slice(0, 4000),
+          }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+        if (reportStatus) reportStatus.textContent = `queued. report_id=${json.report_id}. ${json.note ?? ''}`;
+      } catch (error) {
+        if (reportStatus) reportStatus.textContent = `report error: ${error.message}`;
+      } finally {
+        reportBtn.disabled = false;
+      }
+    });
+  }
+
   return fragment;
 }
 
@@ -804,3 +839,19 @@ gpuFilter.addEventListener('input', renderVisibleNodes);
 minVramFilter.addEventListener('input', renderVisibleNodes);
 loadNodes();
 setInterval(loadNodes, 30_000);
+loadAbuseContact();
+
+async function loadAbuseContact() {
+  try {
+    const res = await fetch('/api/abuse-contact', { cache: 'no-store' });
+    if (!res.ok) return;
+    const { contact } = await res.json();
+    const links = document.querySelectorAll('.abuse-contact-link');
+    for (const link of links) {
+      link.textContent = contact;
+      link.href = contact;
+    }
+  } catch {
+    // best-effort; the abuse notice still mentions the policy
+  }
+}
