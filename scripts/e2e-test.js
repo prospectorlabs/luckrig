@@ -230,6 +230,38 @@ async function main() {
   await rm(process.env.LUCKRIG_METRICS_PATH, { force: true });
   await rm(process.env.LUCKRIG_TOKEN_USAGE_PATH, { force: true });
 
+  // Plaintext-only messages must be rejected even when no subtext payload is present (CONCEPT trust model).
+  await assert.rejects(
+    () => processChatCompletion({
+      body: { model: 'plaintext-poc', stream: true, messages: [{ role: 'user', content: 'plain hello' }] },
+      authHeader: `Bearer ${tokenResponse.json.token}`,
+      nodeId: node.id,
+      trackerSecret: process.env.LUCKRIG_TRACKER_SECRET,
+      nodePrivateKey: nodeKeys.privateKeyPem,
+    }),
+    /plaintext content is not allowed/,
+  );
+
+  // Mixed plaintext + subtext must also be rejected, so accidental history leaks cannot bypass the proxy.
+  const mixedBody = buildEncryptedChatBody({ prompt: 'hi', nodePublicKey: tokenResponse.json.node_public_key, stream: true });
+  mixedBody.messages.unshift({ role: 'system', content: 'leak this system prompt' });
+  await assert.rejects(
+    () => processChatCompletion({
+      body: mixedBody,
+      authHeader: `Bearer ${tokenResponse.json.token}`,
+      nodeId: node.id,
+      trackerSecret: process.env.LUCKRIG_TRACKER_SECRET,
+      nodePrivateKey: nodeKeys.privateKeyPem,
+    }),
+    /only role="user" is allowed/,
+  );
+
+  // Token-usage map purge: stale day keys must be removed by pruneTokenUsageMap.
+  tracker.tokenUsageDaily.set('1970-01-01::limited::old-user', 9);
+  const removed = tracker.pruneTokenUsageMap({ now: new Date('2026-05-22T00:00:00.000Z') });
+  assert.equal(removed >= 1, true);
+  assert.equal(tracker.tokenUsageDaily.has('1970-01-01::limited::old-user'), false);
+
   console.log('[e2e] ok');
   console.log(`[e2e] node=${node.id}`);
   console.log(`[e2e] replay=${replayPath}`);

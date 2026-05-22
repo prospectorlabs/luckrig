@@ -28,6 +28,8 @@ LUCKRIG_DEV=1 npm run dev
 | `LUCKRIG_TOKEN_USAGE_PATH` | `data/token-usage.jsonl` | token usage JSONL mirror（runtime生成、git管理外） |
 | `LUCKRIG_DB_PATH` | `data/luckrig.sqlite` | SQLite DB（runtime生成、git管理外） |
 | `LUCKRIG_USE_SQLITE` | enabled | `0`でSQLiteを無効化 |
+| `LUCKRIG_LIMITED_TOKENS_PER_DAY` | `5` | limited tierの1日あたりtoken発行上限 |
+| `LUCKRIG_TOKEN_USAGE_RETENTION_DAYS` | `7` | 当日越え古い使用量キーの自動purge日数 |
 | `LUCKRIG_HEALTH_INTERVAL_MS` | `30000` | 死活監視間隔 |
 | `LUCKRIG_HEALTH_TIMEOUT_MS` | `2000` | 1ノードあたりのhealth check timeout |
 | `LUCKRIG_DEV` | unset | `1` のとき `POST /api/nodes` と `POST /api/probe` を有効化 |

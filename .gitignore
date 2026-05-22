@@ -34,3 +34,6 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# personal sync helper (not part of repo)
+sync.sh

@@ -25,6 +25,7 @@ const DEV_WRITES_ENABLED = process.env.LUCKRIG_DEV === '1';
 const TRACKER_SECRET = process.env.LUCKRIG_TRACKER_SECRET ?? 'luckrig-dev-secret-change-me';
 const FULL_ACCESS_SCORE_THRESHOLD = Number.parseInt(process.env.LUCKRIG_FULL_ACCESS_SCORE_THRESHOLD ?? '1', 10);
 const LIMITED_TOKENS_PER_DAY = Number.parseInt(process.env.LUCKRIG_LIMITED_TOKENS_PER_DAY ?? '5', 10);
+const TOKEN_USAGE_RETENTION_DAYS = Math.max(1, Number.parseInt(process.env.LUCKRIG_TOKEN_USAGE_RETENTION_DAYS ?? '7', 10));
 
 /** @type {Map<string, import('./types.js').NodeRecord>} */
 const nodes = new Map();
@@ -436,12 +437,30 @@ function tokenUsageKey({ userId, day = dayKey(), tier = 'limited' } = {}) {
   return `${day}::${tier}::${userId || 'anonymous'}`;
 }
 
+
+function pruneTokenUsageMap({ now = new Date(), retentionDays = TOKEN_USAGE_RETENTION_DAYS } = {}) {
+  const cutoff = new Date(now);
+  cutoff.setUTCHours(0, 0, 0, 0);
+  cutoff.setUTCDate(cutoff.getUTCDate() - retentionDays);
+  const cutoffKey = dayKey(cutoff);
+  let removed = 0;
+  for (const key of tokenUsageDaily.keys()) {
+    const [day] = key.split('::');
+    if (day && day < cutoffKey) {
+      tokenUsageDaily.delete(key);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
 function getTokenUsage({ userId, tier = 'limited', day = dayKey() } = {}) {
   return tokenUsageDaily.get(tokenUsageKey({ userId, tier, day })) ?? 0;
 }
 
 async function loadTokenUsage() {
   tokenUsageDaily.clear();
+  // best-effort pruning after rebuilding the map
   const dbEvents = await loadTokenUsageFromDb();
   if (dbEvents.length > 0) {
     for (const event of dbEvents) {
@@ -471,6 +490,7 @@ async function loadTokenUsage() {
       // Ignore malformed token usage lines. JSONL is best-effort append-only data.
     }
   }
+  pruneTokenUsageMap();
 }
 
 async function appendTokenUsage(event) {
@@ -490,6 +510,7 @@ async function appendTokenUsage(event) {
 }
 
 function assertTokenQuota(status) {
+  pruneTokenUsageMap();
   if (status.tier !== 'limited') return { allowed: true, used: null, limit: null };
   const used = getTokenUsage({ userId: status.user_id, tier: status.tier });
   if (used >= LIMITED_TOKENS_PER_DAY) {
@@ -931,6 +952,7 @@ async function main() {
   await loadRegistry();
   await loadMetrics();
   await loadTokenUsage();
+  setInterval(() => pruneTokenUsageMap(), 60 * 60 * 1000).unref();
   await probeAllNodes();
   setInterval(() => {
     probeAllNodes().catch((error) => {
@@ -962,6 +984,9 @@ export {
   contributionStatus,
   handleRequest,
   getTokenUsage,
+  pruneTokenUsageMap,
+  tokenUsageDaily,
+  TOKEN_USAGE_RETENTION_DAYS,
   listMetricsSummaries,
   listPublicNodes,
   loadMetrics,

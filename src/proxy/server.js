@@ -47,10 +47,30 @@ async function readJsonBody(req, maxBytes = 1024 * 1024) {
 
 function extractSubtextMessage(body) {
   const messages = Array.isArray(body.messages) ? body.messages : [];
-  for (const message of messages) {
-    if (typeof message?.content === 'string' && hasSubtext(message.content)) return message.content;
+  if (messages.length === 0) {
+    throw Object.assign(new Error('messages[] is empty'), { statusCode: 400 });
   }
-  throw Object.assign(new Error('encrypted subtext prompt not found in messages[].content'), { statusCode: 400 });
+
+  let subtextMessage = null;
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') {
+      throw Object.assign(new Error('every message must be an object'), { statusCode: 400 });
+    }
+    const role = typeof message.role === 'string' ? message.role.toLowerCase() : '';
+    const content = typeof message.content === 'string' ? message.content : '';
+    if (role !== 'user') {
+      throw Object.assign(new Error(`only role="user" is allowed via luckrig proxy; got role="${message.role ?? ''}"`), { statusCode: 400 });
+    }
+    if (!hasSubtext(content)) {
+      throw Object.assign(new Error('plaintext content is not allowed: all user messages must carry a subtext-encrypted payload'), { statusCode: 400 });
+    }
+    if (subtextMessage === null) subtextMessage = content;
+  }
+
+  if (subtextMessage === null) {
+    throw Object.assign(new Error('encrypted subtext prompt not found in messages[].content'), { statusCode: 400 });
+  }
+  return subtextMessage;
 }
 
 function completionTextFromUpstreamResponse(responseBody) {
@@ -71,13 +91,14 @@ async function mockGenerate({ prompt }) {
 async function callUpstream({ body, prompt, upstreamUrl = UPSTREAM_URL, fetchImpl = fetch }) {
   if (!upstreamUrl) return mockGenerate({ prompt });
 
+  const promptText = typeof prompt?.prompt === 'string' ? prompt.prompt : JSON.stringify(prompt);
+  // Only forward the decrypted user prompt. Never relay other client-side message
+  // entries: extractSubtextMessage already rejects plaintext, but we defense-in-depth
+  // here so even if extraction is broadened later we do not leak plaintext upstream.
   const upstreamBody = {
-    ...body,
+    model: body?.model,
     stream: false,
-    messages: [
-      ...(Array.isArray(body.messages) ? body.messages.filter((m) => !hasSubtext(m?.content)) : []),
-      { role: 'user', content: prompt.prompt ?? JSON.stringify(prompt) },
-    ],
+    messages: [{ role: 'user', content: promptText }],
   };
 
   const res = await fetchImpl(upstreamUrl.replace(/\/$/, '') + '/chat/completions', {

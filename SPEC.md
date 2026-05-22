@@ -236,6 +236,8 @@ Default local history path:
 | `LUCKRIG_UPSTREAM_URL` | unset | OpenAI-compatible upstream base URL. If unset, proxy uses mock generation |
 | `LUCKRIG_NODE_PRIVATE_KEY` | unset | PEM private key used to decrypt public-key subtext prompts |
 | `LUCKRIG_LIMITED_OUTPUT_CHARS` | `240` | POC truncation length for limited-tier output |
+| `LUCKRIG_LIMITED_TOKENS_PER_DAY` | `5` | Daily token quota for limited-tier users |
+| `LUCKRIG_TOKEN_USAGE_RETENTION_DAYS` | `7` | Days to keep token usage entries in-memory before purging |
 
 ---
 
@@ -529,13 +531,14 @@ Behavior:
 
 1. Verify Bearer token.
 2. Verify token `node_id` matches proxy node ID.
-3. Extract invisible subtext payload.
-4. Decrypt prompt envelope.
-5. Forward prompt to upstream or mock generator.
-6. Buffer complete response.
-7. Encrypt response envelope.
-8. Apply limited-tier truncation when token tier is `limited`.
-9. Return pseudo SSE chunks when `stream: true`.
+3. Reject any non-`user` message and any plaintext (subtext-less) message.
+4. Extract invisible subtext payload.
+5. Decrypt prompt envelope.
+6. Forward only the decrypted user prompt to upstream (or mock).
+7. Buffer complete response.
+8. Encrypt response envelope.
+9. Apply limited-tier truncation when token tier is `limited`.
+10. Return pseudo SSE chunks when `stream: true`.
 
 ---
 

@@ -324,6 +324,8 @@ POST /chat/completions
 | `LUCKRIG_NODE_PRIVATE_KEY` | unset | public-key prompt復号用秘密鍵 |
 | `LUCKRIG_UPSTREAM_URL` | unset | OpenAI互換upstream。未設定ならmock |
 | `LUCKRIG_LIMITED_OUTPUT_CHARS` | `240` | limited tier出力truncate長 |
+| `LUCKRIG_LIMITED_TOKENS_PER_DAY` | `5` | limited tierの1日あたりtoken発行上限 |
+| `LUCKRIG_TOKEN_USAGE_RETENTION_DAYS` | `7` | token使用量のメモリ保持日数（自動purge） |
 
 ---
 
