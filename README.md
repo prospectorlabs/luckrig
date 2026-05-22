@@ -4,6 +4,8 @@
 
 ![luckrig — オンプレミスLLM推論APIシェアリングプラットフォーム](./assets/banner.svg)
 
+**ランディングページ → <https://prospectorlabs.dev/luckrig/>**
+
 > 今この瞬間、誰かのオンプレミス環境で動いているLLM推論APIを、貢献ベースで試せる場所
 
 > [!NOTE]

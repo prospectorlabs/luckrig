@@ -4,6 +4,8 @@
 
 ![luckrig — on-premises LLM inference API sharing platform](./assets/banner.svg)
 
+**Landing page → <https://prospectorlabs.dev/luckrig/>**
+
 > A place to try, right now, the LLM inference API running on someone else's on-prem rig — access earned through contribution.
 
 > [!NOTE]
