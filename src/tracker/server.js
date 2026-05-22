@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { readFile, writeFile, stat } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -13,12 +13,16 @@ const PUBLIC_DIR = path.join(ROOT, 'public');
 const PORT = Number.parseInt(process.env.LUCKRIG_PORT ?? '8787', 10);
 const HOST = process.env.LUCKRIG_HOST ?? '127.0.0.1';
 const REGISTRY_PATH = path.resolve(ROOT, process.env.LUCKRIG_REGISTRY_PATH ?? 'data/nodes.seed.json');
+const METRICS_PATH = path.resolve(ROOT, process.env.LUCKRIG_METRICS_PATH ?? 'data/metrics.jsonl');
 const HEALTH_INTERVAL_MS = Number.parseInt(process.env.LUCKRIG_HEALTH_INTERVAL_MS ?? '30000', 10);
 const HEALTH_TIMEOUT_MS = Number.parseInt(process.env.LUCKRIG_HEALTH_TIMEOUT_MS ?? '2000', 10);
 const DEV_WRITES_ENABLED = process.env.LUCKRIG_DEV === '1';
 
 /** @type {Map<string, import('./types.js').NodeRecord>} */
 const nodes = new Map();
+
+/** @type {Map<string, import('./types.js').MetricsSummary>} */
+const metricsSummaries = new Map();
 
 const MIME_TYPES = new Map([
   ['.html', 'text/html; charset=utf-8'],
@@ -121,6 +125,172 @@ function normalizeTags(value) {
   return [...new Set(value.map((tag) => String(tag).trim()).filter(Boolean))].slice(0, 12);
 }
 
+function asOptionalNumber(value, fallback = null) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function pickNumber(source, keys) {
+  if (!source || typeof source !== 'object') return null;
+  for (const key of keys) {
+    const value = source[key];
+    const parsed = asOptionalNumber(value, null);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+function compactObject(value) {
+  if (!value || typeof value !== 'object') return null;
+  const entries = Object.entries(value).filter(([, v]) => v !== null && v !== undefined && v !== '');
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
+}
+
+function normalizeTelemetry(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+
+  const memorySource = payload.memory ?? payload.mem ?? payload.ram ?? payload.vram;
+  const gpuSource = payload.gpu ?? payload.cuda ?? payload.accelerator;
+  const engineSource = payload.engine ?? payload.runtime ?? payload.server;
+  const queueSource = payload.queue;
+
+  const memory = compactObject({
+    used_mb: pickNumber(memorySource, ['used_mb', 'usedMiB', 'used_mib', 'used']),
+    total_mb: pickNumber(memorySource, ['total_mb', 'totalMiB', 'total_mib', 'total']),
+    free_mb: pickNumber(memorySource, ['free_mb', 'freeMiB', 'free_mib', 'free']),
+  });
+
+  const gpu = compactObject({
+    name: typeof gpuSource?.name === 'string' ? gpuSource.name : undefined,
+    utilization_pct: pickNumber(gpuSource, ['utilization_pct', 'utilization', 'util_pct']),
+    memory_used_mb: pickNumber(gpuSource, ['memory_used_mb', 'mem_used_mb', 'vram_used_mb']),
+    memory_total_mb: pickNumber(gpuSource, ['memory_total_mb', 'mem_total_mb', 'vram_total_mb']),
+    temperature_c: pickNumber(gpuSource, ['temperature_c', 'temp_c', 'temperature']),
+    power_w: pickNumber(gpuSource, ['power_w', 'power']),
+  });
+
+  const engine = compactObject({
+    name: typeof engineSource?.name === 'string' ? engineSource.name : undefined,
+    version: typeof engineSource?.version === 'string' ? engineSource.version : undefined,
+    backend: typeof engineSource?.backend === 'string' ? engineSource.backend : undefined,
+  });
+
+  const queue = compactObject({
+    depth: pickNumber(queueSource, ['depth', 'size', 'waiting']),
+    active: pickNumber(queueSource, ['active', 'inflight', 'running']),
+  });
+
+  const normalized = compactObject({
+    memory,
+    gpu,
+    engine,
+    queue,
+    error_rate: pickNumber(payload, ['error_rate', 'errorRate']),
+    active_requests: pickNumber(payload, ['active_requests', 'activeRequests']),
+  });
+
+  return normalized;
+}
+
+async function parseHealthPayload(response) {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('json')) return null;
+
+  const raw = await response.text();
+  if (!raw || raw.length > 64 * 1024) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function emptyMetricsSummary(nodeId) {
+  return {
+    node_id: nodeId,
+    samples_count: 0,
+    available_samples: 0,
+    unavailable_samples: 0,
+    unknown_samples: 0,
+    availability_ratio: null,
+    last_observed_at: null,
+    last_status: 'unknown',
+    last_latency_ms: null,
+    last_memory: null,
+    last_gpu: null,
+    last_engine: null,
+    last_queue: null,
+    last_error_rate: null,
+    last_error: null,
+  };
+}
+
+function updateMetricsSummary(sample) {
+  const summary = metricsSummaries.get(sample.node_id) ?? emptyMetricsSummary(sample.node_id);
+  summary.samples_count += 1;
+  if (sample.status === 'available') summary.available_samples += 1;
+  else if (sample.status === 'unavailable') summary.unavailable_samples += 1;
+  else summary.unknown_samples += 1;
+
+  summary.availability_ratio = summary.samples_count > 0
+    ? Number((summary.available_samples / summary.samples_count).toFixed(4))
+    : null;
+  summary.last_observed_at = sample.observed_at;
+  summary.last_status = sample.status;
+  summary.last_latency_ms = sample.latency_ms;
+  summary.last_memory = sample.telemetry?.memory ?? summary.last_memory;
+  summary.last_gpu = sample.telemetry?.gpu ?? summary.last_gpu;
+  summary.last_engine = sample.telemetry?.engine ?? summary.last_engine;
+  summary.last_queue = sample.telemetry?.queue ?? summary.last_queue;
+  summary.last_error_rate = sample.telemetry?.error_rate ?? summary.last_error_rate;
+  summary.last_error = sample.error ?? null;
+  metricsSummaries.set(sample.node_id, summary);
+  return summary;
+}
+
+async function appendMetricSample(sample) {
+  updateMetricsSummary(sample);
+  try {
+    await mkdir(path.dirname(METRICS_PATH), { recursive: true });
+    await appendFile(METRICS_PATH, `${JSON.stringify(sample)}\n`, 'utf8');
+  } catch (error) {
+    console.error('[tracker] failed to append metrics sample', error);
+  }
+}
+
+async function loadMetrics() {
+  metricsSummaries.clear();
+  let raw;
+  try {
+    raw = await readFile(METRICS_PATH, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const sample = JSON.parse(line);
+      if (sample?.schema_version === 1 && sample?.type === 'health_probe' && sample?.node_id) {
+        updateMetricsSummary(sample);
+      }
+    } catch {
+      // Ignore malformed historical lines. The JSONL append-only log is best-effort.
+    }
+  }
+}
+
+function getMetricsSummary(nodeId) {
+  return metricsSummaries.get(nodeId) ?? emptyMetricsSummary(nodeId);
+}
+
+function listMetricsSummaries() {
+  return [...nodes.keys()].map((nodeId) => getMetricsSummary(nodeId));
+}
+
 function normalizeNode(input, existing = undefined) {
   const modelName = asOptionalString(input.model_name ?? input.modelName);
   const gpu = asOptionalString(input.gpu);
@@ -202,6 +372,7 @@ function publicNode(node, rarityScore) {
     updated_at: node.updated_at,
     rarity_score: rarityScore,
     health: node.health,
+    observations: getMetricsSummary(node.id),
   };
 }
 
@@ -243,6 +414,7 @@ async function saveRegistry() {
 
 async function probeNode(node) {
   const started = performance.now();
+  const observedAt = nowIso();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
   try {
@@ -253,24 +425,56 @@ async function probeNode(node) {
     });
     const latencyMs = Math.round(performance.now() - started);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const healthPayload = await parseHealthPayload(res);
+    const telemetry = normalizeTelemetry(healthPayload);
+
     node.health = {
       status: 'available',
-      last_checked_at: nowIso(),
-      last_seen_at: nowIso(),
+      last_checked_at: observedAt,
+      last_seen_at: observedAt,
       latency_ms: latencyMs,
       consecutive_failures: 0,
       last_error: null,
     };
+
+    await appendMetricSample({
+      schema_version: 1,
+      type: 'health_probe',
+      observed_at: observedAt,
+      node_id: node.id,
+      status: 'available',
+      latency_ms: latencyMs,
+      health_url: node.health_url,
+      telemetry,
+      error: null,
+    });
   } catch (error) {
     const failures = (node.health?.consecutive_failures ?? 0) + 1;
+    const message = error?.name === 'AbortError'
+      ? `timeout after ${HEALTH_TIMEOUT_MS}ms`
+      : String(error?.message ?? error);
+
     node.health = {
       status: failures >= 1 ? 'unavailable' : 'unknown',
-      last_checked_at: nowIso(),
+      last_checked_at: observedAt,
       last_seen_at: node.health?.last_seen_at ?? null,
       latency_ms: null,
       consecutive_failures: failures,
-      last_error: error?.name === 'AbortError' ? `timeout after ${HEALTH_TIMEOUT_MS}ms` : String(error?.message ?? error),
+      last_error: message,
     };
+
+    await appendMetricSample({
+      schema_version: 1,
+      type: 'health_probe',
+      observed_at: observedAt,
+      node_id: node.id,
+      status: node.health.status,
+      latency_ms: null,
+      health_url: node.health_url,
+      telemetry: null,
+      error: message,
+    });
   } finally {
     clearTimeout(timer);
   }
@@ -323,6 +527,7 @@ async function handleApi(req, res, url) {
       ok: true,
       service: 'luckrig-tracker',
       registry_path: REGISTRY_PATH,
+      metrics_path: METRICS_PATH,
       node_count: nodes.size,
       health_interval_ms: HEALTH_INTERVAL_MS,
       health_timeout_ms: HEALTH_TIMEOUT_MS,
@@ -339,6 +544,27 @@ async function handleApi(req, res, url) {
       sort: 'rarity_score_desc_then_vram_asc',
       nodes: listPublicNodes({ status }),
     }, corsHeaders());
+    return;
+  }
+
+  if (url.pathname === '/api/metrics' && req.method === 'GET') {
+    json(res, 200, {
+      schema_version: 1,
+      source: 'health_probe_jsonl',
+      metrics_path: METRICS_PATH,
+      summaries: listMetricsSummaries(),
+    }, corsHeaders());
+    return;
+  }
+
+  const metricsMatch = url.pathname.match(/^\/api\/metrics\/([^/]+)$/);
+  if (metricsMatch && req.method === 'GET') {
+    const id = metricsMatch[1];
+    if (!nodes.has(id)) {
+      json(res, 404, { error: 'node not found' }, corsHeaders());
+      return;
+    }
+    json(res, 200, { schema_version: 1, summary: getMetricsSummary(id) }, corsHeaders());
     return;
   }
 
@@ -401,6 +627,7 @@ async function handleRequest(req, res) {
 
 async function main() {
   await loadRegistry();
+  await loadMetrics();
   await probeAllNodes();
   setInterval(() => {
     probeAllNodes().catch((error) => {
@@ -416,6 +643,7 @@ async function main() {
   server.listen(PORT, HOST, () => {
     console.log(`[tracker] listening on http://${HOST}:${PORT}`);
     console.log(`[tracker] registry=${REGISTRY_PATH}`);
+    console.log(`[tracker] metrics=${METRICS_PATH}`);
     console.log(`[tracker] nodes=${nodes.size} health_interval=${HEALTH_INTERVAL_MS}ms`);
     if (!DEV_WRITES_ENABLED) {
       console.log('[tracker] dev write APIs disabled (set LUCKRIG_DEV=1 to enable POST /api/nodes)');
@@ -424,9 +652,12 @@ async function main() {
 }
 
 export {
+  METRICS_PATH,
   REGISTRY_PATH,
   handleRequest,
+  listMetricsSummaries,
   listPublicNodes,
+  loadMetrics,
   loadRegistry,
   normalizeNode,
   probeAllNodes,

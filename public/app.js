@@ -77,6 +77,22 @@ function renderNode(node) {
     ${health.last_error ? `<span class="error">${health.last_error}</span>` : ''}
   `;
 
+  const observations = node.observations ?? {};
+  const memory = observations.last_memory;
+  const gpu = observations.last_gpu;
+  const memoryLabel = memory?.used_mb && memory?.total_mb
+    ? `${Math.round(memory.used_mb)} / ${Math.round(memory.total_mb)} MB`
+    : '—';
+  const gpuLabel = gpu?.utilization_pct !== undefined
+    ? `${gpu.utilization_pct}%`
+    : '—';
+  fragment.querySelector('.observations').innerHTML = `
+    <span>samples: ${formatValue(observations.samples_count)}</span>
+    <span>availability: ${observations.availability_ratio === null || observations.availability_ratio === undefined ? '—' : `${Math.round(observations.availability_ratio * 100)}%`}</span>
+    <span>memory: ${memoryLabel}</span>
+    <span>gpu util: ${gpuLabel}</span>
+  `;
+
   return fragment;
 }
 

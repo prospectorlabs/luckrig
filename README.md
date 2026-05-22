@@ -53,10 +53,11 @@ npm run test:smoke
 - tracker health: `GET /api/health`
 - ノード一覧: `GET /api/nodes`
 - 詳細: [`docs/tracker-api.md`](./docs/tracker-api.md)
+- metrics schema: [`docs/metrics-schema.md`](./docs/metrics-schema.md)
 
-現段階ではDB・認証・トークン・subtext・擬似SSEは未実装です。CONCEPT.mdの最小実装順序に従い、まず無登録者向けの公開リストと死活監視だけを立ち上げています。
+現段階ではDB・認証・トークン・subtext・擬似SSEは未実装です。CONCEPT.mdの最小実装順序に従い、まず無登録者向けの公開リスト、死活監視、health/telemetry履歴の蓄積だけを立ち上げています。
 
 ## Status
 
-実装開始。Step 1（公開リスト + 死活監視）のtracker prototypeをNode.js標準ライブラリのみで実装済み。コンセプト v5.2 確定。
+実装開始。Step 1（公開リスト + 死活監視）とStep 1.5（health/telemetry履歴JSONL）のtracker prototypeをNode.js標準ライブラリのみで実装済み。コンセプト v5.2 確定。
 

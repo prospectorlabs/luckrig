@@ -1,11 +1,13 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, unlink } from 'node:fs/promises';
 
 async function main() {
   process.env.LUCKRIG_HEALTH_TIMEOUT_MS = process.env.LUCKRIG_HEALTH_TIMEOUT_MS ?? '200';
   process.env.LUCKRIG_HEALTH_INTERVAL_MS = process.env.LUCKRIG_HEALTH_INTERVAL_MS ?? '60000';
+  process.env.LUCKRIG_METRICS_PATH = process.env.LUCKRIG_METRICS_PATH ?? `/tmp/luckrig-smoke-metrics-${process.pid}.jsonl`;
 
   const tracker = await import('../src/tracker/server.js');
   await tracker.loadRegistry();
+  await tracker.loadMetrics();
   await tracker.probeAllNodes();
 
   const nodes = tracker.listPublicNodes();
@@ -23,6 +25,14 @@ async function main() {
     if (!node.health || !['available', 'unavailable', 'unknown'].includes(node.health.status)) {
       throw new Error(`invalid health state for ${node.id}`);
     }
+    if (!node.observations || node.observations.samples_count < 1) {
+      throw new Error(`expected at least one observation for ${node.id}`);
+    }
+  }
+
+  const summaries = tracker.listMetricsSummaries();
+  if (summaries.length !== nodes.length) {
+    throw new Error(`expected one metrics summary per node, got ${summaries.length}`);
   }
 
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
@@ -32,7 +42,12 @@ async function main() {
 
   console.log('[smoke] ok');
   console.log(`[smoke] registry=${tracker.REGISTRY_PATH}`);
+  console.log(`[smoke] metrics=${tracker.METRICS_PATH}`);
   console.log(`[smoke] nodes=${nodes.length}`);
+
+  if (tracker.METRICS_PATH.startsWith('/tmp/luckrig-smoke-metrics-')) {
+    await unlink(tracker.METRICS_PATH).catch(() => {});
+  }
 }
 
 main().catch((error) => {

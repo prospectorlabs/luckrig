@@ -17,9 +17,10 @@ logs/
 .env.*
 !.env.example
 
-# luckrig local data (must never be committed)
+# luckrig local/runtime data (must never be committed)
 .luckrig/
 **/history/*.json
+data/*.jsonl
 
 # Build outputs (placeholders for future stacks)
 dist/

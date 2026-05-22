@@ -30,6 +30,7 @@ LUCKRIG_DEV=1 npm run dev
 | `LUCKRIG_HOST` | `127.0.0.1` | trackerのbind host |
 | `LUCKRIG_PORT` | `8787` | trackerのport |
 | `LUCKRIG_REGISTRY_PATH` | `data/nodes.seed.json` | ノードregistry JSON |
+| `LUCKRIG_METRICS_PATH` | `data/metrics.jsonl` | health/telemetry JSONL（runtime生成、git管理外） |
 | `LUCKRIG_HEALTH_INTERVAL_MS` | `30000` | 死活監視間隔 |
 | `LUCKRIG_HEALTH_TIMEOUT_MS` | `2000` | 1ノードあたりのhealth check timeout |
 | `LUCKRIG_DEV` | unset | `1` のとき `POST /api/nodes` と `POST /api/probe` を有効化 |
@@ -84,6 +85,11 @@ tracker自身のhealth。
         "latency_ms": null,
         "consecutive_failures": 1,
         "last_error": "fetch failed"
+      },
+      "observations": {
+        "samples_count": 1,
+        "availability_ratio": 0,
+        "last_observed_at": "2026-05-22T00:00:00.000Z"
       }
     }
   ]
@@ -93,6 +99,14 @@ tracker自身のhealth。
 ### `GET /api/nodes/:id`
 
 1ノードの公開情報。
+
+### `GET /api/metrics`
+
+health probeのJSONLを集約したサマリ。詳細schemaは [`metrics-schema.md`](./metrics-schema.md) を参照。
+
+### `GET /api/metrics/:id`
+
+1ノード分のmetrics summary。
 
 ## Dev-only endpoints
 
@@ -145,6 +159,7 @@ curl -X POST http://127.0.0.1:8787/api/nodes \
 ## 設計メモ
 
 - 死活監視は `health_url` をGETするだけ。生成リクエストは投げない
+- `health_url` がJSONを返す場合はmemory/gpu/engine/queue等をbest-effortで正規化し、`data/metrics.jsonl` に追記する
 - この段階の `rarity_score` は公開リストの初期ソート用の簡易値。CONCEPT.mdの貢献スコアとは別物
 - ノードが落ちてもペナルティなし。`unavailable` 表示になるだけ
 - tok/sはここでは測らない。Step 2以降もノード自己申告ではなく、利用者側chunk timestamp由来に寄せる
