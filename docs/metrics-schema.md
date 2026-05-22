@@ -18,7 +18,7 @@ CONCEPT.mdの方針に従い、`tok_per_sec` と `ttft_ms` はノード自己申
 - health endpointが返した任意telemetry
 - health probe失敗によるエラー率の材料
 
-以下はまだ扱いません：
+health metrics JSONLの責務外（replay側で扱うもの）：
 
 - `tok_per_sec`
 - `ttft_ms`

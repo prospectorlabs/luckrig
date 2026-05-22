@@ -101,6 +101,86 @@ async function decryptJsonFromSubtextBrowser(text, { sessionSecret } = {}) {
   return JSON.parse(utf8Decode(new Uint8Array(plaintext)));
 }
 
+function pemToBytes(pem) {
+  const base64 = String(pem)
+    .replace(/-----BEGIN [^-]+-----/g, '')
+    .replace(/-----END [^-]+-----/g, '')
+    .replace(/\s+/g, '');
+  return Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+}
+
+function bytesToPem(bytes, label = 'PUBLIC KEY') {
+  const b64 = btoa([...new Uint8Array(bytes)].map((byte) => String.fromCharCode(byte)).join(''));
+  const lines = b64.match(/.{1,64}/g) ?? [];
+  return `-----BEGIN ${label}-----\n${lines.join('\n')}\n-----END ${label}-----\n`;
+}
+
+async function generateBrowserBoxKeyPair() {
+  const pair = await crypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']);
+  const publicSpki = await crypto.subtle.exportKey('spki', pair.publicKey);
+  return {
+    publicKeyPem: bytesToPem(publicSpki),
+    privateKey: pair.privateKey,
+  };
+}
+
+async function importX25519PublicKey(pem) {
+  return crypto.subtle.importKey('spki', pemToBytes(pem), { name: 'X25519' }, false, []);
+}
+
+async function derivePublicKeyAesKey({ privateKey, publicKeyPem, salt, usage }) {
+  const publicKey = await importX25519PublicKey(publicKeyPem);
+  const sharedBits = await crypto.subtle.deriveBits({ name: 'X25519', public: publicKey }, privateKey, 256);
+  const hkdfKey = await crypto.subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt, info: utf8Encode('luckrig-public-key-envelope-v1') },
+    hkdfKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    usage,
+  );
+}
+
+async function encryptJsonToSubtextPublicKeyBrowser(value, { publicKeyPem, coverText = 'luckrig prompt payload' } = {}) {
+  const ephemeral = await generateBrowserBoxKeyPair();
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await derivePublicKeyAesKey({ privateKey: ephemeral.privateKey, publicKeyPem, salt, usage: ['encrypt'] });
+  const encrypted = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, utf8Encode(JSON.stringify(value))));
+  const ciphertext = encrypted.slice(0, -16);
+  const tag = encrypted.slice(-16);
+  const envelope = {
+    v: 1,
+    alg: 'X25519-HKDF-SHA256+A256GCM',
+    ephemeral_public_key: ephemeral.publicKeyPem,
+    salt: base64urlEncode(salt),
+    iv: base64urlEncode(iv),
+    tag: base64urlEncode(tag),
+    ciphertext: base64urlEncode(ciphertext),
+  };
+  return bytesToSubtextBrowser(utf8Encode(JSON.stringify(envelope)), coverText);
+}
+
+async function decryptJsonFromSubtextPublicKeyBrowser(text, { privateKey } = {}) {
+  const envelopeBytes = subtextToBytesBrowser(text);
+  if (envelopeBytes.byteLength === 0) throw new Error('subtext payload not found');
+  const envelope = JSON.parse(utf8Decode(envelopeBytes));
+  if (envelope.v !== 1 || envelope.alg !== 'X25519-HKDF-SHA256+A256GCM') throw new Error('unsupported public-key envelope');
+  const key = await derivePublicKeyAesKey({
+    privateKey,
+    publicKeyPem: envelope.ephemeral_public_key,
+    salt: base64urlDecode(envelope.salt),
+    usage: ['decrypt'],
+  });
+  const ciphertext = base64urlDecode(envelope.ciphertext);
+  const tag = base64urlDecode(envelope.tag);
+  const combined = new Uint8Array(ciphertext.byteLength + tag.byteLength);
+  combined.set(ciphertext, 0);
+  combined.set(tag, ciphertext.byteLength);
+  const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64urlDecode(envelope.iv) }, key, combined);
+  return JSON.parse(utf8Decode(new Uint8Array(plaintext)));
+}
+
 function bytesToSubtextBrowser(bytes, coverText = 'luckrig tasting payload') {
   const hidden = [...new Uint8Array(bytes)].flatMap((byte) => [byte >> 4, byte & 0x0f])
     .map((nibble) => String.fromCodePoint(0xfe00 + nibble))
@@ -178,25 +258,44 @@ async function runBrowserTasting(node, fragment) {
   const proxyUrl = fragment.querySelector('.tasting-proxy-url').value.trim().replace(/\/$/, '');
   const userId = fragment.querySelector('.tasting-user-id').value.trim() || 'browser-poc';
   const contributionScore = Number(fragment.querySelector('.tasting-score').value || 0);
+  const fingerprintConfirm = fragment.querySelector('.fingerprint-confirm').value.trim();
+  const hasNodePublicKey = Boolean(node.node_public_key && node.node_public_key_fingerprint);
 
   output.hidden = true;
   download.hidden = true;
   if (!trust.checked) throw new Error('trust model checkbox is required');
+  if (hasNodePublicKey && fingerprintConfirm !== node.node_public_key_fingerprint) {
+    throw new Error('node public key fingerprint confirmation does not match');
+  }
   if (!prompt) throw new Error('prompt is required');
   if (!proxyUrl) throw new Error('proxy URL is required');
 
+  status.textContent = 'preparing browser key...';
+  let browserKeys = null;
+  if (hasNodePublicKey) {
+    browserKeys = await generateBrowserBoxKeyPair();
+  }
+
   status.textContent = 'requesting token...';
+  const tokenRequest = {
+    node_id: node.id,
+    user_id: userId,
+    contribution_score: contributionScore,
+    ttl_sec: 300,
+    ...(browserKeys ? { user_public_key: browserKeys.publicKeyPem, node_public_key: node.node_public_key } : {}),
+  };
   const tokenRes = await fetch('/api/tokens', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ node_id: node.id, user_id: userId, contribution_score: contributionScore, ttl_sec: 300 }),
+    body: JSON.stringify(tokenRequest),
   });
   const tokenPayload = await tokenRes.json();
   if (!tokenRes.ok) throw new Error(tokenPayload.error ?? `token HTTP ${tokenRes.status}`);
-  if (!tokenPayload.session_secret) throw new Error('browser POC currently expects legacy session-secret token mode');
 
   status.textContent = 'encrypting prompt...';
-  const encryptedPrompt = await encryptJsonToSubtextBrowser({ prompt }, { sessionSecret: tokenPayload.session_secret });
+  const encryptedPrompt = tokenPayload.crypto_mode === 'public-key'
+    ? await encryptJsonToSubtextPublicKeyBrowser({ prompt }, { publicKeyPem: tokenPayload.node_public_key })
+    : await encryptJsonToSubtextBrowser({ prompt }, { sessionSecret: tokenPayload.session_secret });
   const chatBody = {
     model: node.model_name || 'luckrig-browser-poc',
     stream: true,
@@ -218,7 +317,9 @@ async function runBrowserTasting(node, fragment) {
 
   status.textContent = 'decrypting response...';
   const { encryptedContent, chunk_timestamps } = parseSseText(sseText);
-  const envelope = await decryptJsonFromSubtextBrowser(encryptedContent, { sessionSecret: tokenPayload.session_secret });
+  const envelope = tokenPayload.crypto_mode === 'public-key'
+    ? await decryptJsonFromSubtextPublicKeyBrowser(encryptedContent, { privateKey: browserKeys.privateKey })
+    : await decryptJsonFromSubtextBrowser(encryptedContent, { sessionSecret: tokenPayload.session_secret });
   const replay = buildReplayRecordBrowser(envelope, { chunk_timestamps, ttft_ms: Math.round(performance.now() - started) });
 
   output.hidden = false;
@@ -229,7 +330,7 @@ async function runBrowserTasting(node, fragment) {
   download.download = replayFilename(replay);
   download.hidden = false;
   download.textContent = `download replay JSON (${download.download})`;
-  status.textContent = `done: ${replay.tok_per_sec ?? '—'} tok/s, truncated=${replay.limited_output_truncated}`;
+  status.textContent = `done: ${replay.tok_per_sec ?? '—'} tok/s, crypto=${tokenPayload.crypto_mode}, truncated=${replay.limited_output_truncated}`;
 }
 
 function renderSummary(nodes) {

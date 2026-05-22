@@ -21,6 +21,8 @@ logs/
 .luckrig/
 **/history/*.json
 data/*.jsonl
+data/*.sqlite
+data/*.sqlite-*
 
 # Build outputs (placeholders for future stacks)
 dist/

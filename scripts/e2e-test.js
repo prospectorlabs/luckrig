@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 
 process.env.LUCKRIG_TRACKER_SECRET = process.env.LUCKRIG_TRACKER_SECRET ?? 'luckrig-e2e-secret';
 process.env.LUCKRIG_METRICS_PATH = process.env.LUCKRIG_METRICS_PATH ?? `/tmp/luckrig-e2e-metrics-${process.pid}.jsonl`;
+process.env.LUCKRIG_TOKEN_USAGE_PATH = process.env.LUCKRIG_TOKEN_USAGE_PATH ?? `/tmp/luckrig-e2e-token-usage-${process.pid}.jsonl`;
+process.env.LUCKRIG_DB_PATH = process.env.LUCKRIG_DB_PATH ?? `/tmp/luckrig-e2e-${process.pid}.sqlite`;
 process.env.LUCKRIG_HEALTH_TIMEOUT_MS = process.env.LUCKRIG_HEALTH_TIMEOUT_MS ?? '200';
 
 const tracker = await import('../src/tracker/server.js');
@@ -75,8 +77,13 @@ async function requestTracker(input) {
 }
 
 async function main() {
+  await rm(process.env.LUCKRIG_METRICS_PATH, { force: true });
+  await rm(process.env.LUCKRIG_TOKEN_USAGE_PATH, { force: true });
+  await rm(process.env.LUCKRIG_DB_PATH, { force: true });
+  await rm(process.env.LUCKRIG_DB_PATH, { force: true });
   await tracker.loadRegistry();
   await tracker.loadMetrics();
+  await tracker.loadTokenUsage();
   await tracker.probeAllNodes();
 
   const nodesResponse = await requestTracker({ method: 'GET', url: '/api/nodes' });
@@ -185,6 +192,35 @@ async function main() {
   assert.equal(limitedReplay.limited_output_truncated, true);
   assert.match(limitedReplay.response, /limited tasting output truncated/);
 
+  const blockedPromptBody = buildEncryptedChatBody({ prompt: 'NSFW erotic content test', sessionSecret: limitedTokenResponse.json.session_secret, stream: true });
+  await assert.rejects(
+    () => processChatCompletion({
+      body: blockedPromptBody,
+      authHeader: `Bearer ${limitedTokenResponse.json.token}`,
+      nodeId: node.id,
+      trackerSecret: process.env.LUCKRIG_TRACKER_SECRET,
+    }),
+    /NSFW\/explicit sexual content/,
+  );
+
+  for (let i = 0; i < 5; i += 1) {
+    const quotaRes = await requestTracker({
+      method: 'POST',
+      url: '/api/tokens',
+      headers: { 'content-type': 'application/json' },
+      body: { node_id: node.id, user_id: 'quota-e2e', contribution_score: 0, ttl_sec: 60 },
+    });
+    assert.equal(quotaRes.statusCode, 201, quotaRes.text);
+  }
+  const quotaExceeded = await requestTracker({
+    method: 'POST',
+    url: '/api/tokens',
+    headers: { 'content-type': 'application/json' },
+    body: { node_id: node.id, user_id: 'quota-e2e', contribution_score: 0, ttl_sec: 60 },
+  });
+  assert.equal(quotaExceeded.statusCode, 429, quotaExceeded.text);
+  assert.match(quotaExceeded.json.error, /limited token quota exceeded/);
+
   await assert.rejects(
     () => processChatCompletion({ body, authHeader: 'Bearer broken', nodeId: node.id, trackerSecret: process.env.LUCKRIG_TRACKER_SECRET, nodePrivateKey: nodeKeys.privateKeyPem }),
     /invalid token format|invalid token signature/,
@@ -192,6 +228,7 @@ async function main() {
 
   await rm(historyDir, { recursive: true, force: true });
   await rm(process.env.LUCKRIG_METRICS_PATH, { force: true });
+  await rm(process.env.LUCKRIG_TOKEN_USAGE_PATH, { force: true });
 
   console.log('[e2e] ok');
   console.log(`[e2e] node=${node.id}`);

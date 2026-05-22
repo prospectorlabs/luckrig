@@ -1,13 +1,18 @@
-import { readFile, unlink } from 'node:fs/promises';
+import { readFile, stat, unlink } from 'node:fs/promises';
 
 async function main() {
   process.env.LUCKRIG_HEALTH_TIMEOUT_MS = process.env.LUCKRIG_HEALTH_TIMEOUT_MS ?? '200';
   process.env.LUCKRIG_HEALTH_INTERVAL_MS = process.env.LUCKRIG_HEALTH_INTERVAL_MS ?? '60000';
   process.env.LUCKRIG_METRICS_PATH = process.env.LUCKRIG_METRICS_PATH ?? `/tmp/luckrig-smoke-metrics-${process.pid}.jsonl`;
+  process.env.LUCKRIG_TOKEN_USAGE_PATH = process.env.LUCKRIG_TOKEN_USAGE_PATH ?? `/tmp/luckrig-smoke-token-usage-${process.pid}.jsonl`;
+  process.env.LUCKRIG_DB_PATH = process.env.LUCKRIG_DB_PATH ?? `/tmp/luckrig-smoke-${process.pid}.sqlite`;
+
+  await unlink(process.env.LUCKRIG_DB_PATH).catch(() => {});
 
   const tracker = await import('../src/tracker/server.js');
   await tracker.loadRegistry();
   await tracker.loadMetrics();
+  await tracker.loadTokenUsage();
   await tracker.probeAllNodes();
 
   const nodes = tracker.listPublicNodes();
@@ -35,6 +40,9 @@ async function main() {
     }
   }
 
+  const dbInfo = await stat(tracker.DB_PATH);
+  if (!dbInfo.isFile() || dbInfo.size === 0) throw new Error('expected sqlite DB file to be created');
+
   const summaries = tracker.listMetricsSummaries();
   if (summaries.length !== nodes.length) {
     throw new Error(`expected one metrics summary per node, got ${summaries.length}`);
@@ -47,7 +55,7 @@ async function main() {
   if (!html.includes('node public key fingerprint')) {
     throw new Error('index page did not include fingerprint UI marker');
   }
-  if (!html.includes('browser POC') || !html.includes('tasting-trust')) {
+  if (!html.includes('browser POC') || !html.includes('tasting-trust') || !html.includes('fingerprint-confirm')) {
     throw new Error('index page did not include browser tasting/trust UI markers');
   }
 
@@ -58,6 +66,8 @@ async function main() {
 
   if (tracker.METRICS_PATH.startsWith('/tmp/luckrig-smoke-metrics-')) {
     await unlink(tracker.METRICS_PATH).catch(() => {});
+    await unlink(tracker.TOKEN_USAGE_PATH).catch(() => {});
+    await unlink(tracker.DB_PATH).catch(() => {});
   }
 }
 

@@ -59,7 +59,7 @@ CONCEPT上の最終形：
 - token payloadには利用者公開鍵とノード公開鍵を含める（秘密鍵は含めない）
 - promptはノード公開鍵で暗号化し、proxyがノード秘密鍵で復号
 - responseは利用者公開鍵で暗号化し、clientが利用者秘密鍵で復号
-- tracker + nodeの共謀による公開鍵すり替えリスクはCONCEPT通り残る（POCはfingerprintを露出するが、検証UXは未実装）
+- tracker + nodeの共謀による公開鍵すり替えリスクはCONCEPT通り残る（POCはfingerprintを表示し、ブラウザ試食前に一致入力を要求する。別経路公開などの強い運用は今後のhardening）
 
 ## ローカル起動例
 
@@ -148,23 +148,23 @@ npm test
 
 ## Browser tasting POC
 
-Public UIの各ノードカードには `試食する / browser POC` パネルがあります。現時点のブラウザ実装は、WebCrypto互換性を優先してlegacy `session-secret` token modeを使います。流れは以下です。
+Public UIの各ノードカードには `試食する / browser POC` パネルがあります。node public keyがある場合、ブラウザはWebCrypto X25519/HKDF/AES-GCMでpublic-key modeを使います。流れは以下です。
 
 1. trust checkboxを確認
-2. `POST /api/tokens` で短命tokenを取得
-3. browser WebCrypto AES-GCMでpromptをsubtext化
-4. node proxyへOpenAI互換リクエスト
-5. pseudo SSEを復号
-6. replay JSONをdownload
+2. fingerprint確認欄に別経路で確認した値を貼り付け
+3. `POST /api/tokens` で短命tokenを取得
+4. browser WebCryptoでpromptをnode public key向けにsubtext化
+5. node proxyへOpenAI互換リクエスト
+6. pseudo SSEを復号
+7. replay JSONをdownload
 
-Node/CLI E2Eではpublic-key modeを検証済みです。ブラウザのproduction public-key flowはfingerprint確認UXと合わせて後続です。
+Node/CLI E2EとブラウザUIの両方でpublic-key modeを検証/実装済みです。node public keyがないノードのみlegacy session-secret modeにfallbackします。
 
-## まだPOC外のこと
+## 今後の強化項目
 
-- production-grade公開鍵フィンガープリント検証 / 鍵すり替え対策
-- 永続DB
-- durable quota enforcement（POCはlimited出力truncateのみ）
-- NSFW filter
-- 実tokenizerによるtok/s算出
-- production public-key browser tasting（現ブラウザPOCはlegacy session-secret mode）
+- filter ruleの運用チューニング
+- SQLite schema migration管理
+- durable quotaの管理UI
+- 実model tokenizerによるtok/s精度向上
 - contribution scoreの本採点
+- v6以降の画像/音声系対応

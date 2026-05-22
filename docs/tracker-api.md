@@ -2,12 +2,7 @@
 
 このAPIは、CONCEPT.md §「最小実装の順序」に沿ったPOC trackerです。無登録者向け公開リスト、死活監視、health/telemetry履歴、POC token発行までを担当します。
 
-この段階では以下をまだ実装しません：
-
-- tok/s / TTFT の本計測（Step 2以降。tok/sは利用者側リプレイデータを一次ソースにする）
-- production-grade公開鍵ハンドオフ付きトークン発行（Step 4）
-- production UIでのキューUX操作（Step 5）
-- production-grade貢献スコア / 権限管理（Step 7）
+このAPIはprompt/response本文を保存しません。tok/s / TTFTはtracker health metricsではなく、replay側のchunk timestampを一次ソースにします。現在はPOC token、public-key handoff、fingerprint、SQLite永続化、limited quota、prompt filterまで実装済みです。
 
 ## 起動
 
@@ -29,7 +24,10 @@ LUCKRIG_DEV=1 npm run dev
 | `LUCKRIG_HOST` | `127.0.0.1` | trackerのbind host |
 | `LUCKRIG_PORT` | `8787` | trackerのport |
 | `LUCKRIG_REGISTRY_PATH` | `data/nodes.seed.json` | ノードregistry JSON |
-| `LUCKRIG_METRICS_PATH` | `data/metrics.jsonl` | health/telemetry JSONL（runtime生成、git管理外） |
+| `LUCKRIG_METRICS_PATH` | `data/metrics.jsonl` | health/telemetry JSONL mirror（runtime生成、git管理外） |
+| `LUCKRIG_TOKEN_USAGE_PATH` | `data/token-usage.jsonl` | token usage JSONL mirror（runtime生成、git管理外） |
+| `LUCKRIG_DB_PATH` | `data/luckrig.sqlite` | SQLite DB（runtime生成、git管理外） |
+| `LUCKRIG_USE_SQLITE` | enabled | `0`でSQLiteを無効化 |
 | `LUCKRIG_HEALTH_INTERVAL_MS` | `30000` | 死活監視間隔 |
 | `LUCKRIG_HEALTH_TIMEOUT_MS` | `2000` | 1ノードあたりのhealth check timeout |
 | `LUCKRIG_DEV` | unset | `1` のとき `POST /api/nodes` と `POST /api/probe` を有効化 |
@@ -155,7 +153,7 @@ curl -X POST http://127.0.0.1:8787/api/nodes \
 
 ## registry schema
 
-`data/nodes.seed.json` は配列です。現時点ではDBを導入せず、Step 1の動作確認を優先しています。
+`data/nodes.seed.json` は初期seedです。起動後はSQLite (`LUCKRIG_DB_PATH`) に取り込まれ、dev登録もSQLiteへ保存されます。
 
 必須：
 

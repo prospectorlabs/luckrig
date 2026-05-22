@@ -16,17 +16,26 @@ const PORT = Number.parseInt(process.env.LUCKRIG_PORT ?? '8787', 10);
 const HOST = process.env.LUCKRIG_HOST ?? '127.0.0.1';
 const REGISTRY_PATH = path.resolve(ROOT, process.env.LUCKRIG_REGISTRY_PATH ?? 'data/nodes.seed.json');
 const METRICS_PATH = path.resolve(ROOT, process.env.LUCKRIG_METRICS_PATH ?? 'data/metrics.jsonl');
+const TOKEN_USAGE_PATH = path.resolve(ROOT, process.env.LUCKRIG_TOKEN_USAGE_PATH ?? 'data/token-usage.jsonl');
+const DB_PATH = path.resolve(ROOT, process.env.LUCKRIG_DB_PATH ?? 'data/luckrig.sqlite');
+const USE_SQLITE = process.env.LUCKRIG_USE_SQLITE !== '0';
 const HEALTH_INTERVAL_MS = Number.parseInt(process.env.LUCKRIG_HEALTH_INTERVAL_MS ?? '30000', 10);
 const HEALTH_TIMEOUT_MS = Number.parseInt(process.env.LUCKRIG_HEALTH_TIMEOUT_MS ?? '2000', 10);
 const DEV_WRITES_ENABLED = process.env.LUCKRIG_DEV === '1';
 const TRACKER_SECRET = process.env.LUCKRIG_TRACKER_SECRET ?? 'luckrig-dev-secret-change-me';
 const FULL_ACCESS_SCORE_THRESHOLD = Number.parseInt(process.env.LUCKRIG_FULL_ACCESS_SCORE_THRESHOLD ?? '1', 10);
+const LIMITED_TOKENS_PER_DAY = Number.parseInt(process.env.LUCKRIG_LIMITED_TOKENS_PER_DAY ?? '5', 10);
 
 /** @type {Map<string, import('./types.js').NodeRecord>} */
 const nodes = new Map();
 
 /** @type {Map<string, import('./types.js').MetricsSummary>} */
 const metricsSummaries = new Map();
+
+/** @type {Map<string, number>} */
+const tokenUsageDaily = new Map();
+
+let sqliteDb = null;
 
 const MIME_TYPES = new Map([
   ['.html', 'text/html; charset=utf-8'],
@@ -36,6 +45,105 @@ const MIME_TYPES = new Map([
   ['.svg', 'image/svg+xml'],
   ['.ico', 'image/x-icon'],
 ]);
+
+
+async function getDb() {
+  if (!USE_SQLITE) return null;
+  if (sqliteDb) return sqliteDb;
+  await mkdir(path.dirname(DB_PATH), { recursive: true });
+  const { DatabaseSync } = await import('node:sqlite');
+  sqliteDb = new DatabaseSync(DB_PATH);
+  sqliteDb.exec(`
+    CREATE TABLE IF NOT EXISTS nodes (
+      id TEXT PRIMARY KEY,
+      json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS metrics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      node_id TEXT NOT NULL,
+      observed_at TEXT NOT NULL,
+      status TEXT NOT NULL,
+      json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_metrics_node_observed ON metrics(node_id, observed_at);
+    CREATE TABLE IF NOT EXISTS token_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      day TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      node_id TEXT NOT NULL,
+      tier TEXT NOT NULL,
+      token_jti TEXT NOT NULL,
+      crypto_mode TEXT NOT NULL,
+      issued_at TEXT NOT NULL,
+      json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_token_usage_day_user_tier ON token_usage(day, user_id, tier);
+    CREATE TABLE IF NOT EXISTS contribution_state (
+      user_id TEXT PRIMARY KEY,
+      score REAL NOT NULL DEFAULT 0,
+      tier TEXT NOT NULL DEFAULT 'limited',
+      updated_at TEXT NOT NULL
+    );
+  `);
+  return sqliteDb;
+}
+
+async function dbAll(sql, params = []) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.prepare(sql).all(...params);
+}
+
+async function dbRun(sql, params = []) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.prepare(sql).run(...params);
+}
+
+async function upsertNodeDb(node) {
+  await dbRun(
+    'INSERT INTO nodes (id, json, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at',
+    [node.id, JSON.stringify(node), node.updated_at ?? nowIso()],
+  );
+}
+
+async function loadNodesFromDb() {
+  const rows = await dbAll('SELECT json FROM nodes ORDER BY id');
+  return rows.map((row) => JSON.parse(row.json));
+}
+
+async function appendMetricDb(sample) {
+  await dbRun(
+    'INSERT INTO metrics (node_id, observed_at, status, json) VALUES (?, ?, ?, ?)',
+    [sample.node_id, sample.observed_at, sample.status, JSON.stringify(sample)],
+  );
+}
+
+async function loadMetricSamplesFromDb() {
+  const rows = await dbAll('SELECT json FROM metrics ORDER BY id');
+  return rows.map((row) => JSON.parse(row.json));
+}
+
+async function appendTokenUsageDb(event) {
+  await dbRun(
+    'INSERT INTO token_usage (day, user_id, node_id, tier, token_jti, crypto_mode, issued_at, json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [event.day, event.user_id, event.node_id, event.tier, event.token_jti, event.crypto_mode, event.issued_at, JSON.stringify(event)],
+  );
+}
+
+
+async function upsertContributionState(status) {
+  await dbRun(
+    'INSERT INTO contribution_state (user_id, score, tier, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET score = excluded.score, tier = excluded.tier, updated_at = excluded.updated_at',
+    [status.user_id, status.contribution_score, status.tier, nowIso()],
+  );
+}
+
+async function loadTokenUsageFromDb() {
+  const rows = await dbAll('SELECT json FROM token_usage ORDER BY id');
+  return rows.map((row) => JSON.parse(row.json));
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -256,6 +364,7 @@ function updateMetricsSummary(sample) {
 
 async function appendMetricSample(sample) {
   updateMetricsSummary(sample);
+  await appendMetricDb(sample);
   try {
     await mkdir(path.dirname(METRICS_PATH), { recursive: true });
     await appendFile(METRICS_PATH, `${JSON.stringify(sample)}\n`, 'utf8');
@@ -266,6 +375,14 @@ async function appendMetricSample(sample) {
 
 async function loadMetrics() {
   metricsSummaries.clear();
+  const dbSamples = await loadMetricSamplesFromDb();
+  if (dbSamples.length > 0) {
+    for (const sample of dbSamples) {
+      if (sample?.schema_version === 1 && sample?.type === 'health_probe' && sample?.node_id) updateMetricsSummary(sample);
+    }
+    return;
+  }
+
   let raw;
   try {
     raw = await readFile(METRICS_PATH, 'utf8');
@@ -280,6 +397,7 @@ async function loadMetrics() {
       const sample = JSON.parse(line);
       if (sample?.schema_version === 1 && sample?.type === 'health_probe' && sample?.node_id) {
         updateMetricsSummary(sample);
+        await appendMetricDb(sample);
       }
     } catch {
       // Ignore malformed historical lines. The JSONL append-only log is best-effort.
@@ -307,6 +425,80 @@ function contributionStatus({ userId = 'anonymous', contributionScore = 0 } = {}
       ? { mode: 'full', description: 'POC contributor token: all listed models may be requested.' }
       : { mode: 'limited', description: 'POC limited token: tasting access only. Production will enforce stricter quota/output limits.' },
   };
+}
+
+
+function dayKey(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+
+function tokenUsageKey({ userId, day = dayKey(), tier = 'limited' } = {}) {
+  return `${day}::${tier}::${userId || 'anonymous'}`;
+}
+
+function getTokenUsage({ userId, tier = 'limited', day = dayKey() } = {}) {
+  return tokenUsageDaily.get(tokenUsageKey({ userId, tier, day })) ?? 0;
+}
+
+async function loadTokenUsage() {
+  tokenUsageDaily.clear();
+  const dbEvents = await loadTokenUsageFromDb();
+  if (dbEvents.length > 0) {
+    for (const event of dbEvents) {
+      const key = tokenUsageKey({ userId: event.user_id, tier: event.tier, day: event.day });
+      tokenUsageDaily.set(key, (tokenUsageDaily.get(key) ?? 0) + 1);
+    }
+    return;
+  }
+
+  let raw;
+  try {
+    raw = await readFile(TOKEN_USAGE_PATH, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const event = JSON.parse(line);
+      if (event?.schema_version === 1 && event?.type === 'token_issued') {
+        const key = tokenUsageKey({ userId: event.user_id, tier: event.tier, day: event.day });
+        tokenUsageDaily.set(key, (tokenUsageDaily.get(key) ?? 0) + 1);
+        await appendTokenUsageDb(event);
+      }
+    } catch {
+      // Ignore malformed token usage lines. JSONL is best-effort append-only data.
+    }
+  }
+}
+
+async function appendTokenUsage(event) {
+  const normalized = {
+    schema_version: 1,
+    type: 'token_issued',
+    issued_at: nowIso(),
+    day: dayKey(),
+    ...event,
+  };
+  const key = tokenUsageKey({ userId: normalized.user_id, tier: normalized.tier, day: normalized.day });
+  tokenUsageDaily.set(key, (tokenUsageDaily.get(key) ?? 0) + 1);
+  await appendTokenUsageDb(normalized);
+  await mkdir(path.dirname(TOKEN_USAGE_PATH), { recursive: true });
+  await appendFile(TOKEN_USAGE_PATH, `${JSON.stringify(normalized)}\n`, 'utf8');
+  return normalized;
+}
+
+function assertTokenQuota(status) {
+  if (status.tier !== 'limited') return { allowed: true, used: null, limit: null };
+  const used = getTokenUsage({ userId: status.user_id, tier: status.tier });
+  if (used >= LIMITED_TOKENS_PER_DAY) {
+    const error = new Error(`limited token quota exceeded for today (${used}/${LIMITED_TOKENS_PER_DAY})`);
+    error.statusCode = 429;
+    error.quota = { allowed: false, used, limit: LIMITED_TOKENS_PER_DAY };
+    throw error;
+  }
+  return { allowed: true, used, limit: LIMITED_TOKENS_PER_DAY };
 }
 
 function normalizeNode(input, existing = undefined) {
@@ -427,19 +619,34 @@ function listPublicNodes({ status } = {}) {
 }
 
 async function loadRegistry() {
+  nodes.clear();
+  const dbRecords = await loadNodesFromDb();
+  if (dbRecords.length > 0) {
+    for (const entry of dbRecords) {
+      const node = normalizeNode(entry);
+      nodes.set(node.id, node);
+    }
+    return;
+  }
+
   const raw = await readFile(REGISTRY_PATH, 'utf8');
   const parsed = JSON.parse(raw);
   if (!Array.isArray(parsed)) throw new Error(`registry must be an array: ${REGISTRY_PATH}`);
-  nodes.clear();
   for (const entry of parsed) {
     const node = normalizeNode(entry);
     nodes.set(node.id, node);
+    await upsertNodeDb(node);
   }
 }
 
 async function saveRegistry() {
   const records = [...nodes.values()].map(({ health: _health, ...node }) => node);
-  await writeFile(REGISTRY_PATH, `${JSON.stringify(records, null, 2)}\n`, 'utf8');
+  if (USE_SQLITE) {
+    for (const node of records) await upsertNodeDb(node);
+    return;
+  }
+  await writeFile(REGISTRY_PATH, `${JSON.stringify(records, null, 2)}
+`, 'utf8');
 }
 
 async function probeNode(node) {
@@ -558,11 +765,14 @@ async function handleApi(req, res, url) {
       service: 'luckrig-tracker',
       registry_path: REGISTRY_PATH,
       metrics_path: METRICS_PATH,
+      token_usage_path: TOKEN_USAGE_PATH,
+      db_path: USE_SQLITE ? DB_PATH : null,
       node_count: nodes.size,
       health_interval_ms: HEALTH_INTERVAL_MS,
       health_timeout_ms: HEALTH_TIMEOUT_MS,
       dev_writes_enabled: DEV_WRITES_ENABLED,
       full_access_score_threshold: FULL_ACCESS_SCORE_THRESHOLD,
+      limited_tokens_per_day: LIMITED_TOKENS_PER_DAY,
       now: nowIso(),
     }, corsHeaders());
     return;
@@ -583,6 +793,8 @@ async function handleApi(req, res, url) {
       schema_version: 1,
       source: 'health_probe_jsonl',
       metrics_path: METRICS_PATH,
+      token_usage_path: TOKEN_USAGE_PATH,
+      db_path: USE_SQLITE ? DB_PATH : null,
       summaries: listMetricsSummaries(),
     }, corsHeaders());
     return;
@@ -599,6 +811,8 @@ async function handleApi(req, res, url) {
       userId: asOptionalString(body.user_id ?? body.userId, 'anonymous'),
       contributionScore: body.contribution_score ?? body.contributionScore ?? 0,
     });
+    const quota = assertTokenQuota(status);
+    await upsertContributionState(status);
     const node = nodes.get(nodeId);
     const userPublicKey = asOptionalString(body.user_public_key ?? body.userPublicKey);
     const nodePublicKey = node?.node_public_key || asOptionalString(body.node_public_key ?? body.nodePublicKey);
@@ -611,6 +825,13 @@ async function handleApi(req, res, url) {
       userPublicKey: userPublicKey || null,
       nodePublicKey: nodePublicKey || null,
     });
+    await appendTokenUsage({
+      user_id: status.user_id,
+      node_id: nodeId,
+      tier: status.tier,
+      token_jti: issued.payload.jti,
+      crypto_mode: issued.payload.crypto_mode,
+    });
     json(res, 201, {
       schema_version: 1,
       token_type: 'Bearer',
@@ -622,6 +843,7 @@ async function handleApi(req, res, url) {
       node_public_key_fingerprint: issued.payload.node_public_key_fingerprint ?? (nodePublicKey ? publicKeyFingerprint(nodePublicKey) : null),
       user_public_key_fingerprint: issued.payload.user_public_key_fingerprint ?? null,
       contribution: status,
+      quota,
       node: publicNode(nodes.get(nodeId), computeRarityScores().get(nodeId) ?? 0),
       caveat: issued.payload.crypto_mode === 'public-key'
         ? 'Public-key POC mode: prompt is encrypted for node key and response is encrypted for user key. Tracker still signs and transports public keys.'
@@ -708,6 +930,7 @@ async function handleRequest(req, res) {
 async function main() {
   await loadRegistry();
   await loadMetrics();
+  await loadTokenUsage();
   await probeAllNodes();
   setInterval(() => {
     probeAllNodes().catch((error) => {
@@ -733,12 +956,16 @@ async function main() {
 
 export {
   METRICS_PATH,
+  TOKEN_USAGE_PATH,
+  DB_PATH,
   REGISTRY_PATH,
   contributionStatus,
   handleRequest,
+  getTokenUsage,
   listMetricsSummaries,
   listPublicNodes,
   loadMetrics,
+  loadTokenUsage,
   loadRegistry,
   normalizeNode,
   probeAllNodes,

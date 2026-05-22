@@ -2,6 +2,7 @@ import http from 'node:http';
 import { createServer as createMockUpstreamServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { assertPromptAllowed } from '../shared/filter.js';
 import { bearerToken, verifyTastingToken } from '../shared/token.js';
 import {
   decryptJsonFromSubtext,
@@ -134,6 +135,8 @@ export async function processChatCompletion({
     ? decryptJsonFromSubtextWithPrivateKey(encryptedPromptText, { privateKey: nodePrivateKey })
     : decryptJsonFromSubtext(encryptedPromptText, { sessionSecret: tokenPayload.session_secret });
 
+  const promptPolicy = assertPromptAllowed(prompt);
+
   const queuedAt = performance.now();
   // POC queue UX: buffer upstream response fully, then emit pseudo SSE in one pass.
   const generationStartedAt = performance.now();
@@ -146,6 +149,7 @@ export async function processChatCompletion({
     schema_version: 1,
     node_id: nodeId,
     prompt,
+      prompt_policy: promptPolicy,
     response: tiered.text,
     limited_output_truncated: tiered.limited,
     queue_wait_sec: Number(queueWaitSec.toFixed(3)),

@@ -104,11 +104,11 @@ Goals:
 | E3 | Health and telemetry | Implemented via JSONL metrics |
 | E4 | Contribution-aware access | POC token/tier implemented |
 | E5 | Privacy-aware tasting | POC public-key subtext + proxy implemented |
-| E6 | Queue UX / pseudo SSE | Proxy-side pseudo SSE implemented; full browser UX pending |
-| E7 | Local replay | Client replay save/load implemented; full browser UX pending |
-| E8 | Showcase and diversity | Initial rarity sort implemented; full Showcase categories pending |
-| E9 | Trust, disclaimers, and safety | Partially documented; UI enforcement pending |
-| E10 | Production hardening | Pending |
+| E6 | Queue UX / pseudo SSE | Implemented in proxy and browser tasting POC |
+| E7 | Local replay | Implemented, including browser replay JSON download |
+| E8 | Showcase and diversity | Initial rarity/Showcase visibility implemented |
+| E9 | Trust, disclaimers, and safety | Trust notice, fingerprint confirmation, and prompt filter implemented |
+| E10 | Production hardening | SQLite persistence, token quota, fingerprint gate implemented; future hardening remains |
 
 ---
 
@@ -381,7 +381,7 @@ Acceptance criteria:
 - Docs state node operator can inspect process internals.
 - Docs state tracker + node can collude via key substitution.
 - Public key fingerprints are exposed.
-- Production still needs fingerprint verification UX / alternate trust channel.
+- UI now requires fingerprint confirmation before browser tasting; alternate trust channels remain future hardening.
 
 Current evidence:
 
@@ -409,7 +409,7 @@ Current evidence:
 - `processChatCompletion()`
 - `buildPseudoSseChunks()`
 - Browser tasting panel requests a token, encrypts prompt, calls proxy, decrypts pseudo SSE, and offers replay JSON download
-- Browser POC currently uses legacy session-secret mode; production public-key browser mode remains pending
+- Browser POC uses public-key mode when node public key exists, with legacy session-secret fallback for keyless nodes
 
 #### US-6.2 — Preserve OpenAI-compatible shape
 
@@ -531,7 +531,7 @@ Acceptance criteria:
 Current evidence:
 
 - `CONCEPT.md` §フィルタリング方針
-- Implementation pending
+- Basic prompt filter implemented in proxy; rules will need operational tuning
 
 ---
 
@@ -553,7 +553,7 @@ Current evidence:
 - Fingerprint generation implemented
 - Public node cards display/copy fingerprint when present
 - Trust notice tells users to verify out-of-band before tasting
-- Full affirmative confirmation gate before browser tasting is pending
+- Browser tasting requires trust checkbox and exact fingerprint confirmation when a node key exists
 
 #### US-10.2 — Persist production data durably
 
@@ -569,7 +569,7 @@ Acceptance criteria:
 Current evidence:
 
 - JSON/JSONL POC only
-- Production DB pending
+- SQLite persistence implemented for nodes, metrics, token usage, and contribution-state table; migration tooling remains future hardening
 
 #### US-10.3 — Enforce real quota
 
@@ -585,7 +585,7 @@ Current evidence:
 
 - Tier label implemented
 - Proxy truncates limited-tier output using `LUCKRIG_LIMITED_OUTPUT_CHARS`
-- Durable quota across repeated token requests remains pending
+- Durable daily token quota is enforced for limited users; quota admin UI remains future hardening
 
 ---
 
@@ -681,13 +681,17 @@ Success indicators:
 - Browser tasting flow for Journey C using legacy session-secret browser POC mode
 - US-9.1 Trust/disclaimer checkbox gate in browser tasting panel
 - US-10.3 Basic limited-tier output truncation in proxy
+- US-9.2 Basic prompt filtering in proxy
+- US-10.2 SQLite persistence for registry/metrics/token usage
+- Durable daily token quota for limited users
+- Browser public-key tasting when node key exists
 
 ### Next recommended stories
 
-1. **US-9.2 Prompt filtering**
-2. **US-10.2 Durable DB migration**
-3. **Production public-key browser tasting (WebCrypto compatible key flow)**
-4. **Full affirmative fingerprint verification gate before tasting**
+1. **SQLite migration/admin tooling**
+2. **Quota management UI**
+3. **Tokenizer integration for replay benchmarks**
+4. **Real llama.cpp / ollama integration test profile**
 
 ---
 

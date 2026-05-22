@@ -52,8 +52,8 @@ tracker
 - Guaranteed SLA
 - Payment / credit marketplace
 - Attestation / canary prompts / output verification
-- Production content-moderation policy beyond explicit project stance
-- Production public-key fingerprint verification / key-substitution mitigation in the current POC
+- Image/audio modality filtering beyond text prompt policy
+- Strong key-substitution mitigation beyond displayed fingerprint confirmation
 
 ### 2.3 Non-negotiable product constraints
 
@@ -215,7 +215,10 @@ Default local history path:
 | `LUCKRIG_HOST` | `127.0.0.1` | Tracker bind host |
 | `LUCKRIG_PORT` | `8787` | Tracker bind port |
 | `LUCKRIG_REGISTRY_PATH` | `data/nodes.seed.json` | Node registry JSON path |
-| `LUCKRIG_METRICS_PATH` | `data/metrics.jsonl` | Runtime health/telemetry JSONL path |
+| `LUCKRIG_METRICS_PATH` | `data/metrics.jsonl` | Runtime health/telemetry JSONL mirror path |
+| `LUCKRIG_TOKEN_USAGE_PATH` | `data/token-usage.jsonl` | Runtime token-usage JSONL mirror path |
+| `LUCKRIG_DB_PATH` | `data/luckrig.sqlite` | SQLite DB for registry, metrics, token usage, contribution state |
+| `LUCKRIG_USE_SQLITE` | enabled | Set `0` to disable SQLite and use JSON/JSONL only |
 | `LUCKRIG_HEALTH_INTERVAL_MS` | `30000` | Health probe interval |
 | `LUCKRIG_HEALTH_TIMEOUT_MS` | `2000` | Health probe timeout per node |
 | `LUCKRIG_DEV` | unset | Enables dev-only write endpoints when `1` |
@@ -301,7 +304,7 @@ Runtime file:
 data/metrics.jsonl
 ```
 
-This file is append-only runtime data and must not be committed.
+This file is append-only runtime mirror data and must not be committed. SQLite is the durable store by default in the current implementation.
 
 One line per health probe:
 
@@ -463,7 +466,7 @@ POC caveat:
 
 - Preferred POC mode is `crypto_mode: public-key`; token carries public keys, never private keys.
 - Legacy `session-secret` mode remains for compatibility only.
-- Production must add independent public-key fingerprint verification UX / alternate trust channels to mitigate tracker/node key substitution.
+- Current UI requires fingerprint confirmation before browser tasting. Stronger alternate trust channels can be added later to further mitigate tracker/node key substitution.
 
 ### 6.7 Contribution status
 
@@ -583,7 +586,7 @@ POC token:
 Production token:
 
 - Must prefer public-key mode.
-- Must add public-key fingerprint verification / alternate trust channel support.
+- Must expose public-key fingerprint and require user confirmation before browser tasting; stronger alternate trust channels are future hardening.
 
 ---
 
@@ -602,7 +605,7 @@ POC implementation:
 - Anonymous list viewing is implemented.
 - Token issuance accepts `contribution_score` input.
 - `score >= threshold` gives `contributor` tier.
-- Real scoring and quota enforcement are not yet implemented.
+- POC implements limited-tier durable token quota and output truncation; full multi-axis contribution scoring remains future work.
 
 ### 8.2 Contribution score principles
 
@@ -794,20 +797,19 @@ src/shared/                shared token/base64url helpers
 
 ---
 
-## 13. Productionization Backlog
+## 13. Future Hardening Backlog
 
-Before production, at minimum:
+The v1/POC path is implemented and tested. Remaining items are future hardening or v6+ scope rather than blockers for the current implementation:
 
-1. Add production-grade public-key fingerprint verification and key-substitution mitigation.
-2. Introduce durable DB for registry, tokens, metrics summaries, contribution state.
-3. Implement real quota enforcement for limited users.
-4. Implement production node registration flow.
-5. Add actual upstream integration tests against llama.cpp / ollama compatible endpoints.
-6. Add tokenizer-aware replay benchmark calculations.
-7. Add content filtering policy and enforcement.
-8. Add UI flow for tasting: token request → queue UX → pseudo SSE playback → replay save.
-9. Add operational docs for node providers.
-10. Add migration/versioning story for metrics and replay schemas.
+1. Alternate trust channels for node public-key fingerprint publication.
+2. SQLite schema migration/admin tooling.
+3. Quota management UI and long-term abuse analytics.
+4. Production account/registration workflow around the existing node registration API.
+5. Optional real llama.cpp / ollama integration test profile when such endpoints are available.
+6. Model-tokenizer integration for more accurate replay benchmark calculations.
+7. Prompt filter rule tuning based on real community examples.
+8. Expanded operational docs for node providers.
+10. Migration/versioning tooling for metrics and replay schemas.
 
 ---
 
@@ -826,4 +828,4 @@ The current POC is considered valid when all of the following hold:
 - Client can parse pseudo SSE and create a local replay record.
 - Replay record can be saved and loaded.
 - Invalid token is rejected.
-- Docs clearly state that public-key mode still requires fingerprint verification to mitigate key substitution.
+- Docs and UI require/display fingerprint confirmation and clearly state remaining trust limits.

@@ -59,12 +59,12 @@ luckrigのプライバシー設計は「頑張らなければ見えない」で�
 
 ### 2.3 POC上の暗号モード
 
-現在のPOCには2つの経路があります。
+現在のPOCには2つの経路があります。ブラウザ試食もnode public keyがある場合はpublic-key modeを使います。
 
 | 経路 | 用途 | 状態 |
 | --- | --- | --- |
-| public-key mode | Node/CLI E2E。node public key / user public keyを使う | 実装済み |
-| legacy session-secret mode | ブラウザ試食POC。WebCrypto互換性優先 | 実装済み・後方互換扱い |
+| public-key mode | Node/CLI E2Eおよびブラウザ試食。node public key / user public keyを使う | 実装済み |
+| legacy session-secret mode | node public keyがない古いノード向けfallback | 実装済み・後方互換扱い |
 
 本番では public-key mode を前提に、さらにfingerprint検証UXを追加する必要があります。
 
@@ -236,7 +236,10 @@ http://127.0.0.1:8787/
 | `LUCKRIG_DEV` | unset | `1`でdev登録APIを有効化 |
 | `LUCKRIG_TRACKER_SECRET` | dev default | POC token署名secret |
 | `LUCKRIG_REGISTRY_PATH` | `data/nodes.seed.json` | node registry |
-| `LUCKRIG_METRICS_PATH` | `data/metrics.jsonl` | runtime metrics JSONL |
+| `LUCKRIG_METRICS_PATH` | `data/metrics.jsonl` | runtime metrics JSONL mirror |
+| `LUCKRIG_TOKEN_USAGE_PATH` | `data/token-usage.jsonl` | token usage JSONL mirror |
+| `LUCKRIG_DB_PATH` | `data/luckrig.sqlite` | SQLite永続DB |
+| `LUCKRIG_USE_SQLITE` | enabled | `0`でSQLiteを無効化 |
 | `LUCKRIG_HEALTH_INTERVAL_MS` | `30000` | health probe間隔 |
 | `LUCKRIG_HEALTH_TIMEOUT_MS` | `2000` | health probe timeout |
 
@@ -398,7 +401,7 @@ node src/cli/luckrig.js token \
   --contribution-score 0
 ```
 
-ブラウザ試食POCは現在このmodeを使います。
+node public keyがないノードではこのmodeにfallbackします。通常はpublic-key modeを使ってください。
 
 ---
 
@@ -427,7 +430,7 @@ LUCKRIG_TRACKER_SECRET=dev-secret \
 node src/proxy/server.js
 ```
 
-ブラウザ試食POCはlegacy session-secret modeを使うため、mock modeで試すだけなら `LUCKRIG_NODE_PRIVATE_KEY` は不要です。
+node public keyを持つノードでブラウザ試食する場合はpublic-key modeになるため、proxy側に対応する `LUCKRIG_NODE_PRIVATE_KEY` が必要です。node public keyがないノードではlegacy session-secret fallbackになります。
 
 ### 12.2 UI操作
 
@@ -533,7 +536,7 @@ replay JSONには以下が入ります。
 
 ## 15. metrics JSONL
 
-trackerはhealth probeの結果をJSONLに追記します。
+trackerはhealth probeの結果をSQLiteに保存し、互換用にJSONL mirrorにも追記します。
 
 既定:
 
@@ -541,7 +544,7 @@ trackerはhealth probeの結果をJSONLに追記します。
 data/metrics.jsonl
 ```
 
-このファイルはruntime dataなのでgit管理外です。
+SQLite DBとJSONL mirrorはruntime dataなのでgit管理外です。
 
 確認API:
 
@@ -629,18 +632,17 @@ source .tools/git-env.sh
 
 ---
 
-## 18. 現時点で未完了のproduction課題
+## 18. 現時点でv1範囲外または今後強化する課題
 
-POCとしては一通り動きますが、本番化には以下が必要です。
+v1/POCとして一通り動きます。今後の強化項目は以下です。
 
-- NSFW / prompt filtering
-- durable DB
-- production public-key browser tasting
-- full fingerprint verification UX
-- durable quota enforcement
-- tokenizer-aware tok/s
-- 本番運用向けnode provider docs
+- filter ruleの運用チューニング
+- SQLite schema migration管理
+- durable quotaの管理UI
+- 実model tokenizer連携によるtok/s精度向上
+- Tailscale等を含む本番運用向けnode provider docsの拡充
 - contribution scoreの本採点
+- v6以降の画像/音声系対応
 
 ---
 
