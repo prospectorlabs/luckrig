@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/tracker/server.js",
     "dev": "LUCKRIG_DEV=1 node --watch src/tracker/server.js",
-    "check": "node --check src/tracker/server.js && node --check src/proxy/server.js && node --check src/cli/luckrig.js && node --check src/subtext/index.js && node --check src/shared/keyhandshake.js && node --check src/shared/filter.js && node --check src/shared/tokenizer.js && node --check src/client/replay.js && node --check src/client/tasting.js && node --check public/app.js",
+    "check": "node --check src/tracker/server.js && node --check src/proxy/server.js && node --check src/cli/luckrig.js && node --check src/subtext/index.js && node --check src/shared/keyhandshake.js && node --check src/shared/filter.js && node --check src/shared/tokenizer.js && node --check src/shared/fingerprint.js && node --check src/client/replay.js && node --check src/client/tasting.js && node --check public/app.js",
     "test:smoke": "node --no-warnings scripts/smoke-test.js",
     "test:e2e": "node --no-warnings scripts/e2e-test.js",
     "test": "npm run check && npm run test:smoke && npm run test:e2e"

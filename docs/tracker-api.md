@@ -30,6 +30,7 @@ LUCKRIG_DEV=1 npm run dev
 | `LUCKRIG_USE_SQLITE` | enabled | `0`でSQLiteを無効化 |
 | `LUCKRIG_LIMITED_TOKENS_PER_DAY` | `5` | limited tierの1日あたりtoken発行上限 |
 | `LUCKRIG_TOKEN_USAGE_RETENTION_DAYS` | `7` | 当日越え古い使用量キーの自動purge日数 |
+| `LUCKRIG_TOKEN_IP_LIMIT_PER_DAY` | `100` | IP単位の1日あたりtoken発行上限 |
 | `LUCKRIG_HEALTH_INTERVAL_MS` | `30000` | 死活監視間隔 |
 | `LUCKRIG_HEALTH_TIMEOUT_MS` | `2000` | 1ノードあたりのhealth check timeout |
 | `LUCKRIG_DEV` | unset | `1` のとき `POST /api/nodes` と `POST /api/probe` を有効化 |
@@ -146,6 +147,27 @@ trackerが自動生成したShowcaseカテゴリと該当ノードを返しま�
 ### `GET /api/contribution/:user_id?score=1`
 
 貢献tier判定。`score >= LUCKRIG_FULL_ACCESS_SCORE_THRESHOLD` なら `contributor`。
+
+### `POST /api/fingerprint/verify`
+
+node public key fingerprintを別経路URLから取得して照合します。
+
+```json
+{
+  "node_id": "first-5090-qwen3",
+  "url": "https://example.com/luckrig-fingerprint.txt"
+}
+```
+
+レスポンス:
+
+```json
+{
+  "ok": true,
+  "expected": "sha256:...",
+  "found": "sha256:..."
+}
+```
 
 ## Dev-only endpoints
 

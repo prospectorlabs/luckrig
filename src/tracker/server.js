@@ -4,6 +4,7 @@ import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { verifyFingerprintText } from '../shared/fingerprint.js';
 import { publicKeyFingerprint } from '../shared/keyhandshake.js';
 import { issueTastingToken } from '../shared/token.js';
 
@@ -26,6 +27,7 @@ const TRACKER_SECRET = process.env.LUCKRIG_TRACKER_SECRET ?? 'luckrig-dev-secret
 const FULL_ACCESS_SCORE_THRESHOLD = Number.parseInt(process.env.LUCKRIG_FULL_ACCESS_SCORE_THRESHOLD ?? '1', 10);
 const LIMITED_TOKENS_PER_DAY = Number.parseInt(process.env.LUCKRIG_LIMITED_TOKENS_PER_DAY ?? '5', 10);
 const TOKEN_USAGE_RETENTION_DAYS = Math.max(1, Number.parseInt(process.env.LUCKRIG_TOKEN_USAGE_RETENTION_DAYS ?? '7', 10));
+const TOKEN_IP_LIMIT_PER_DAY = Math.max(1, Number.parseInt(process.env.LUCKRIG_TOKEN_IP_LIMIT_PER_DAY ?? '100', 10));
 
 /** @type {Map<string, import('./types.js').NodeRecord>} */
 const nodes = new Map();
@@ -35,6 +37,7 @@ const metricsSummaries = new Map();
 
 /** @type {Map<string, number>} */
 const tokenUsageDaily = new Map();
+const tokenIpUsageDaily = new Map();
 
 /** @type {Array<object>} */
 const tokenUsageEvents = [];
@@ -436,6 +439,67 @@ function dayKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
 }
 
+
+function ipUsageKey({ ip, day = dayKey() } = {}) {
+  return `${day}::${ip || 'unknown'}`;
+}
+
+function clientIpFromReq(req) {
+  const forwarded = String(req.headers?.['x-forwarded-for'] ?? '').split(',')[0].trim();
+  return forwarded || req.socket?.remoteAddress || 'local';
+}
+
+function pruneIpUsageMap({ now = new Date(), retentionDays = TOKEN_USAGE_RETENTION_DAYS } = {}) {
+  const cutoff = new Date(now);
+  cutoff.setUTCHours(0, 0, 0, 0);
+  cutoff.setUTCDate(cutoff.getUTCDate() - retentionDays);
+  const cutoffKey = dayKey(cutoff);
+  let removed = 0;
+  for (const key of tokenIpUsageDaily.keys()) {
+    const [day] = key.split('::');
+    if (day && day < cutoffKey) {
+      tokenIpUsageDaily.delete(key);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
+function assertIpTokenRate(req) {
+  pruneIpUsageMap();
+  const ip = clientIpFromReq(req);
+  const key = ipUsageKey({ ip });
+  const used = tokenIpUsageDaily.get(key) ?? 0;
+  if (used >= TOKEN_IP_LIMIT_PER_DAY) {
+    const error = new Error(`IP token rate limit exceeded for today (${used}/${TOKEN_IP_LIMIT_PER_DAY})`);
+    error.statusCode = 429;
+    error.rate_limit = { ip, used, limit: TOKEN_IP_LIMIT_PER_DAY };
+    throw error;
+  }
+  return { ip, used, limit: TOKEN_IP_LIMIT_PER_DAY };
+}
+
+function recordIpTokenUsage(rate) {
+  if (!rate?.ip) return;
+  const key = ipUsageKey({ ip: rate.ip });
+  tokenIpUsageDaily.set(key, (tokenIpUsageDaily.get(key) ?? 0) + 1);
+}
+
+async function verifyFingerprintUrl({ expected, url, fetchImpl = fetch } = {}) {
+  const parsed = new URL(url);
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw Object.assign(new Error('fingerprint_url must be http or https'), { statusCode: 400 });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
+  try {
+    const res = await fetchImpl(parsed, { signal: controller.signal, headers: { 'user-agent': 'luckrig-tracker/0.0.0' } });
+    if (!res.ok) throw Object.assign(new Error(`fingerprint_url HTTP ${res.status}`), { statusCode: 502 });
+    const text = await res.text();
+    return verifyFingerprintText({ expected, text });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function tokenUsageKey({ userId, day = dayKey(), tier = 'limited' } = {}) {
   return `${day}::${tier}::${userId || 'anonymous'}`;
 }
@@ -556,6 +620,7 @@ function normalizeNode(input, existing = undefined) {
     endpoint_url: endpointUrl,
     health_url: healthUrl,
     node_public_key: asOptionalString(input.node_public_key ?? input.nodePublicKey),
+    fingerprint_url: asOptionalString(input.fingerprint_url ?? input.fingerprintUrl),
     model_name: modelName,
     quantization,
     lora: asOptionalString(input.lora, 'なし'),
@@ -615,6 +680,7 @@ function publicNode(node, rarityScore) {
     endpoint_url: node.endpoint_url,
     node_public_key: node.node_public_key || null,
     node_public_key_fingerprint: nodePublicKeyFingerprint(node),
+    fingerprint_url: node.fingerprint_url || null,
     model_name: node.model_name,
     quantization: node.quantization,
     lora: node.lora,
@@ -909,6 +975,7 @@ async function handleApi(req, res, url) {
       json(res, 404, { error: 'node not found' }, corsHeaders());
       return;
     }
+    const ipRate = assertIpTokenRate(req);
     const status = contributionStatus({
       userId: asOptionalString(body.user_id ?? body.userId, 'anonymous'),
       contributionScore: body.contribution_score ?? body.contributionScore ?? 0,
@@ -927,6 +994,7 @@ async function handleApi(req, res, url) {
       userPublicKey: userPublicKey || null,
       nodePublicKey: nodePublicKey || null,
     });
+    recordIpTokenUsage(ipRate);
     await appendTokenUsage({
       user_id: status.user_id,
       node_id: nodeId,
@@ -946,6 +1014,7 @@ async function handleApi(req, res, url) {
       user_public_key_fingerprint: issued.payload.user_public_key_fingerprint ?? null,
       contribution: status,
       quota,
+      rate_limit: ipRate,
       node: publicNode(nodes.get(nodeId), computeRarityScores().get(nodeId) ?? 0),
       caveat: issued.payload.crypto_mode === 'public-key'
         ? 'Public-key POC mode: prompt is encrypted for node key and response is encrypted for user key. Tracker still signs and transports public keys.'
@@ -978,6 +1047,26 @@ async function handleApi(req, res, url) {
       categories: showcase.categories,
       nodes: showcase.categories.map((entry) => publicNode(nodes.get(entry.node_id), computeRarityScores().get(entry.node_id) ?? 0)),
     }, corsHeaders());
+    return;
+  }
+
+
+  if (url.pathname === '/api/fingerprint/verify' && req.method === 'POST') {
+    const body = await readJsonBody(req);
+    const nodeId = asOptionalString(body.node_id ?? body.nodeId);
+    const node = nodes.get(nodeId);
+    if (!node) {
+      json(res, 404, { error: 'node not found' }, corsHeaders());
+      return;
+    }
+    const fingerprintUrl = asOptionalString(body.url ?? body.fingerprint_url ?? body.fingerprintUrl, node.fingerprint_url);
+    if (!fingerprintUrl) {
+      json(res, 400, { error: 'fingerprint url is required' }, corsHeaders());
+      return;
+    }
+    const expected = nodePublicKeyFingerprint(node);
+    const result = await verifyFingerprintUrl({ expected, url: fingerprintUrl });
+    json(res, 200, { schema_version: 1, node_id: nodeId, url: fingerprintUrl, ...result }, corsHeaders());
     return;
   }
 
@@ -1053,7 +1142,7 @@ async function main() {
   await loadRegistry();
   await loadMetrics();
   await loadTokenUsage();
-  setInterval(() => pruneTokenUsageMap(), 60 * 60 * 1000).unref();
+  setInterval(() => { pruneTokenUsageMap(); pruneIpUsageMap(); }, 60 * 60 * 1000).unref();
   await probeAllNodes();
   setInterval(() => {
     probeAllNodes().catch((error) => {
@@ -1091,6 +1180,10 @@ export {
   tokenUsageDaily,
   tokenUsageEvents,
   TOKEN_USAGE_RETENTION_DAYS,
+  TOKEN_IP_LIMIT_PER_DAY,
+  tokenIpUsageDaily,
+  pruneIpUsageMap,
+  verifyFingerprintUrl,
   listMetricsSummaries,
   listPublicNodes,
   loadMetrics,

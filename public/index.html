@@ -96,6 +96,14 @@
               <input class="tasting-score" type="number" min="0" step="1" value="0" />
             </label>
           </div>
+          <label class="prompt-label fingerprint-url-label">
+            <span>fingerprint URL（任意: GitHub Gist / 自分のドメイン等）</span>
+            <input class="fingerprint-url" type="url" placeholder="https://example.com/luckrig-fingerprint.txt" />
+          </label>
+          <div class="fingerprint-verify-actions">
+            <button class="verify-fingerprint-url" type="button">別経路fingerprintを照合</button>
+            <span class="fingerprint-verify-status"></span>
+          </div>
           <label class="prompt-label fingerprint-confirm-label">
             <span>fingerprint確認（別経路で確認した値を貼り付け）</span>
             <input class="fingerprint-confirm" type="text" placeholder="sha256:..." />

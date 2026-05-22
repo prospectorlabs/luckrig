@@ -691,6 +691,8 @@ Success indicators:
 - Multi-axis node contribution score
 - Auto-generated Showcase categories
 - Persistent browser identity for repeated tastings
+- Out-of-band fingerprint URL verification
+- IP-level token rate limiting
 
 ### Next recommended hardening stories
 
@@ -698,7 +700,7 @@ Success indicators:
 2. **Quota management UI**
 3. **Full tokenizer integration for replay benchmarks**
 4. **Real llama.cpp / ollama integration test profile**
-5. **Alternate-channel fingerprint publication guide**
+5. **Additional alternate-channel fingerprint publication guide**
 
 ---
 

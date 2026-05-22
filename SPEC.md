@@ -45,6 +45,8 @@ tracker
 - Multi-axis node contribution scoring
 - Auto-generated Showcase categories
 - Browser identity persistence for repeated tastings
+- Out-of-band fingerprint URL verification
+- IP-based token rate limiting
 - subtext-based prompt / response hiding
 - Buffered generation with pseudo SSE playback
 - Local replay persistence
@@ -244,6 +246,7 @@ Default local history path:
 | `LUCKRIG_LIMITED_OUTPUT_CHARS` | `240` | POC truncation length for limited-tier output |
 | `LUCKRIG_LIMITED_TOKENS_PER_DAY` | `5` | Daily token quota for limited-tier users |
 | `LUCKRIG_TOKEN_USAGE_RETENTION_DAYS` | `7` | Days to keep token usage entries in-memory before purging |
+| `LUCKRIG_TOKEN_IP_LIMIT_PER_DAY` | `100` | IP-level daily token issuance limit |
 
 ---
 
@@ -815,7 +818,7 @@ src/shared/                shared token/base64url helpers
 
 The v1/POC path is implemented and tested. Remaining items below are hardening or v6+ scope, not incomplete current-scope implementation:
 
-1. Alternate trust channels for node public-key fingerprint publication.
+1. More alternate trust channels for node public-key fingerprint publication beyond the implemented fingerprint URL verifier.
 2. SQLite schema migration/admin tooling.
 3. Quota management UI and long-term abuse analytics.
 4. Production account/registration workflow around the existing node registration API.

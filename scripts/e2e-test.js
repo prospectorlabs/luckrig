@@ -128,6 +128,13 @@ async function main() {
   assert.ok(showcaseList.json.categories.length >= 1);
   assert.ok(showcaseList.json.nodes.length >= 1);
 
+  const fpVerification = await tracker.verifyFingerprintUrl({
+    expected: tokenResponse.json.node_public_key_fingerprint,
+    url: 'https://fingerprint.example/luckrig.txt',
+    fetchImpl: async () => ({ ok: true, async text() { return `node key ${tokenResponse.json.node_public_key_fingerprint}`; } }),
+  });
+  assert.equal(fpVerification.ok, true);
+
   const tokenPayload = verifyTastingToken(tokenResponse.json.token, {
     secret: process.env.LUCKRIG_TRACKER_SECRET,
     expectedNodeId: node.id,
@@ -235,6 +242,17 @@ async function main() {
   });
   assert.equal(quotaExceeded.statusCode, 429, quotaExceeded.text);
   assert.match(quotaExceeded.json.error, /limited token quota exceeded/);
+
+  tracker.tokenIpUsageDaily.set(`${new Date().toISOString().slice(0, 10)}::local`, tracker.TOKEN_IP_LIMIT_PER_DAY);
+  const ipLimited = await requestTracker({
+    method: 'POST',
+    url: '/api/tokens',
+    headers: { 'content-type': 'application/json' },
+    body: { node_id: node.id, user_id: 'ip-limit-e2e', contribution_score: 1, ttl_sec: 60 },
+  });
+  assert.equal(ipLimited.statusCode, 429, ipLimited.text);
+  assert.match(ipLimited.json.error, /IP token rate limit exceeded/);
+  tracker.tokenIpUsageDaily.clear();
 
   await assert.rejects(
     () => processChatCompletion({ body, authHeader: 'Bearer broken', nodeId: node.id, trackerSecret: process.env.LUCKRIG_TRACKER_SECRET, nodePrivateKey: nodeKeys.privateKeyPem }),

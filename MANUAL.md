@@ -327,6 +327,7 @@ POST /chat/completions
 | `LUCKRIG_LIMITED_OUTPUT_CHARS` | `240` | limited tier出力truncate長 |
 | `LUCKRIG_LIMITED_TOKENS_PER_DAY` | `5` | limited tierの1日あたりtoken発行上限 |
 | `LUCKRIG_TOKEN_USAGE_RETENTION_DAYS` | `7` | token使用量のメモリ保持日数（自動purge） |
+| `LUCKRIG_TOKEN_IP_LIMIT_PER_DAY` | `100` | IP単位の1日あたりtoken発行上限 |
 
 ---
 
@@ -530,7 +531,7 @@ replay JSONには以下が入ります。
 | quant | 量子化 |
 | GPU / VRAM / ctx | 実行環境 |
 | tuning note | ノード提供者のメモ |
-| node public key fingerprint | 公開鍵fingerprint |
+| node public key fingerprint | 公開鍵fingerprint。URL照合ボタンで別経路検証可能 |
 | samples / availability | health probe集計 |
 | queue | proxyのactive/waiting状態 |
 | contribution | existence/rarity/usage/discovery/noteの合算score |

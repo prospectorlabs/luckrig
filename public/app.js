@@ -442,6 +442,26 @@ function renderVisibleNodes() {
   }
 }
 
+
+async function verifyFingerprintUrlForNode(node, fragment) {
+  const urlInput = fragment.querySelector('.fingerprint-url');
+  const confirmInput = fragment.querySelector('.fingerprint-confirm');
+  const status = fragment.querySelector('.fingerprint-verify-status');
+  const url = urlInput.value.trim();
+  if (!url) throw new Error('fingerprint URL is required');
+  status.textContent = 'verifying...';
+  const res = await fetch('/api/fingerprint/verify', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ node_id: node.id, url }),
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(payload.error ?? `verify HTTP ${res.status}`);
+  if (!payload.ok) throw new Error(`fingerprint mismatch: found ${payload.found ?? 'none'}`);
+  confirmInput.value = payload.expected;
+  status.textContent = 'verified';
+}
+
 function renderSummary(nodes) {
   const counts = nodes.reduce((acc, node) => {
     acc[node.health.status] = (acc[node.health.status] ?? 0) + 1;
@@ -509,10 +529,25 @@ function renderNode(node) {
   const fingerprintHelp = fragment.querySelector('.fingerprint-help');
   const copyButton = fragment.querySelector('.copy-fingerprint');
   fingerprintValue.textContent = fingerprint;
+  fragment.querySelector('.fingerprint-url').value = node.fingerprint_url ?? '';
+  const verifyButton = fragment.querySelector('.verify-fingerprint-url');
+  const verifyStatus = fragment.querySelector('.fingerprint-verify-status');
+  verifyButton.addEventListener('click', async () => {
+    verifyButton.disabled = true;
+    try {
+      await verifyFingerprintUrlForNode(node, fragment);
+    } catch (error) {
+      verifyStatus.textContent = `verify error: ${error.message}`;
+    } finally {
+      verifyButton.disabled = false;
+    }
+  });
+
   if (fingerprint === '—') {
     fingerprintPanel.dataset.state = 'missing';
     fingerprintHelp.textContent = 'public-key tasting unavailable until this node registers a key';
     copyButton.disabled = true;
+    verifyButton.disabled = true;
   } else {
     fingerprintPanel.dataset.state = 'present';
     fingerprintHelp.textContent = 'verify out-of-band before tasting';
