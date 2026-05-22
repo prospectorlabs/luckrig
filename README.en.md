@@ -2,7 +2,7 @@
 
 [日本語](./README.md) | **English**
 
-![luckrig — on-premises LLM inference API sharing platform](./assets/banner.png)
+![luckrig — on-premises LLM inference API sharing platform](./assets/banner.svg)
 
 > A place to try, right now, the LLM inference API running on someone else's on-prem rig — access earned through contribution.
 

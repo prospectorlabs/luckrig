@@ -8,6 +8,11 @@
       <stop offset="0" stop-color="#3ddc97"/>
       <stop offset="1" stop-color="#38bdf8"/>
     </linearGradient>
+    <linearGradient id="scan" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3ddc97" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#3ddc97" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#3ddc97" stop-opacity="0"/>
+    </linearGradient>
     <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
       <path d="M32 0H0V32" fill="none" stroke="#1d2b3d" stroke-width="1"/>
     </pattern>
@@ -15,33 +20,66 @@
 
   <rect width="1280" height="360" fill="url(#bg)"/>
   <rect width="1280" height="360" fill="url(#grid)" opacity="0.5"/>
+
+  <!-- scanline sweeping across the grid -->
+  <rect width="260" height="360" fill="url(#scan)">
+    <animateTransform attributeName="transform" type="translate"
+      values="-260,0; 1280,0" dur="6s" begin="0s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- left accent bar with a travelling highlight -->
   <rect x="0" y="0" width="6" height="360" fill="url(#accent)"/>
+  <rect x="0" width="6" height="70" fill="#eafff5" opacity="0.55">
+    <animate attributeName="y" values="-70;360" dur="3.2s" begin="0s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0;0.55;0" dur="3.2s" begin="0s" repeatCount="indefinite"/>
+  </rect>
 
   <!-- eyebrow -->
-  <text x="72" y="84" fill="#5f7689" font-size="16" letter-spacing="4" font-weight="600">ON-PREM LLM INFERENCE API SHARING</text>
+  <text x="72" y="84" fill="#5f7689" font-size="16" letter-spacing="4" font-weight="600" opacity="0">
+    ON-PREM LLM INFERENCE API SHARING
+    <animate attributeName="opacity" values="0;1" dur="0.6s" begin="0.1s" fill="freeze"/>
+  </text>
 
   <!-- wordmark -->
-  <text x="70" y="174" fill="#f4f7fb" font-size="86" font-weight="700">luckrig<tspan fill="#3ddc97">_</tspan></text>
+  <text x="70" y="174" fill="#f4f7fb" font-size="86" font-weight="700" opacity="0">
+    luckrig<tspan fill="#3ddc97" dx="2">_<animate attributeName="opacity" values="1;1;0;0" keyTimes="0;0.5;0.5;1" dur="1.06s" begin="1s" repeatCount="indefinite"/></tspan>
+    <animate attributeName="opacity" values="0;1" dur="0.5s" begin="0.35s" fill="freeze"/>
+    <animateTransform attributeName="transform" type="translate" values="-14,0; 0,0" dur="0.5s" begin="0.35s" fill="freeze"/>
+  </text>
 
   <!-- tagline -->
-  <text x="72" y="222" fill="#aebfcf" font-size="22">Try the LLM rig running on someone's machine — right now.</text>
-  <text x="72" y="252" fill="#7d92a6" font-size="19">Access earned by contribution, not money. luckrig maps <tspan fill="#9fb3c6">infrastructure</tspan>, not models.</text>
+  <text x="72" y="222" fill="#aebfcf" font-size="22" opacity="0">
+    Try the LLM rig running on someone's machine — right now.
+    <animate attributeName="opacity" values="0;1" dur="0.5s" begin="0.6s" fill="freeze"/>
+  </text>
+  <text x="72" y="252" fill="#7d92a6" font-size="19" opacity="0">
+    Access earned by contribution, not money. luckrig maps <tspan fill="#9fb3c6">infrastructure</tspan>, not models.
+    <animate attributeName="opacity" values="0;1" dur="0.5s" begin="0.75s" fill="freeze"/>
+  </text>
 
-  <!-- chips -->
+  <!-- chips (staggered fade + rise) -->
   <g font-size="15" fill="#c6d4e1">
-    <g>
+    <g opacity="0">
+      <animate attributeName="opacity" values="0;1" dur="0.4s" begin="0.95s" fill="freeze"/>
+      <animateTransform attributeName="transform" type="translate" values="0,10; 0,0" dur="0.4s" begin="0.95s" fill="freeze"/>
       <rect x="72" y="292" width="168" height="34" rx="17" fill="#16222f" stroke="#27384a"/>
       <text x="156" y="314" text-anchor="middle">OpenAI-compatible</text>
     </g>
-    <g>
+    <g opacity="0">
+      <animate attributeName="opacity" values="0;1" dur="0.4s" begin="1.05s" fill="freeze"/>
+      <animateTransform attributeName="transform" type="translate" values="0,10; 0,0" dur="0.4s" begin="1.05s" fill="freeze"/>
       <rect x="252" y="292" width="172" height="34" rx="17" fill="#16222f" stroke="#27384a"/>
       <text x="338" y="314" text-anchor="middle">contribution-based</text>
     </g>
-    <g>
+    <g opacity="0">
+      <animate attributeName="opacity" values="0;1" dur="0.4s" begin="1.15s" fill="freeze"/>
+      <animateTransform attributeName="transform" type="translate" values="0,10; 0,0" dur="0.4s" begin="1.15s" fill="freeze"/>
       <rect x="436" y="292" width="92" height="34" rx="17" fill="#16222f" stroke="#27384a"/>
       <text x="482" y="314" text-anchor="middle">no SLA</text>
     </g>
-    <g>
+    <g opacity="0">
+      <animate attributeName="opacity" values="0;1" dur="0.4s" begin="1.25s" fill="freeze"/>
+      <animateTransform attributeName="transform" type="translate" values="0,10; 0,0" dur="0.4s" begin="1.25s" fill="freeze"/>
       <rect x="540" y="292" width="184" height="34" rx="17" fill="#16222f" stroke="#27384a"/>
       <text x="632" y="314" text-anchor="middle">real-time infra map</text>
     </g>
@@ -49,8 +87,24 @@
 
   <!-- top-right faux telemetry readout (kept clear of the wordmark) -->
   <g font-size="15" fill="#5f7689" text-anchor="end">
-    <text x="1208" y="116"><tspan fill="#3ddc97">●</tspan> <tspan fill="#9fb3c6">first-5090-qwen3</tspan> · available</text>
+    <text x="1208" y="116"><tspan fill="#3ddc97">●<animate attributeName="opacity" values="1;0.3;1" dur="1.6s" begin="0s" repeatCount="indefinite"/></tspan> <tspan fill="#9fb3c6">first-5090-qwen3</tspan> · available</text>
     <text x="1208" y="146">RTX 5090 · Q4_K_XL · ctx 65536</text>
     <text x="1208" y="176">267.4 tok/s p50 · TTFT 842 ms · n=14</text>
+  </g>
+
+  <!-- live throughput sparkline (top-right, below the readout) -->
+  <g fill="url(#accent)" opacity="0.8">
+    <rect x="1012" y="214" width="10" height="16"><animate attributeName="height" values="16;36;12;28;16" dur="1.8s" begin="0s"    repeatCount="indefinite"/><animate attributeName="y" values="214;194;218;202;214" dur="1.8s" begin="0s"    repeatCount="indefinite"/></rect>
+    <rect x="1026" y="214" width="10" height="16"><animate attributeName="height" values="16;36;12;28;16" dur="1.8s" begin="-0.15s" repeatCount="indefinite"/><animate attributeName="y" values="214;194;218;202;214" dur="1.8s" begin="-0.15s" repeatCount="indefinite"/></rect>
+    <rect x="1040" y="214" width="10" height="16"><animate attributeName="height" values="16;36;12;28;16" dur="1.8s" begin="-0.30s" repeatCount="indefinite"/><animate attributeName="y" values="214;194;218;202;214" dur="1.8s" begin="-0.30s" repeatCount="indefinite"/></rect>
+    <rect x="1054" y="214" width="10" height="16"><animate attributeName="height" values="16;36;12;28;16" dur="1.8s" begin="-0.45s" repeatCount="indefinite"/><animate attributeName="y" values="214;194;218;202;214" dur="1.8s" begin="-0.45s" repeatCount="indefinite"/></rect>
+    <rect x="1068" y="214" width="10" height="16"><animate attributeName="height" values="16;36;12;28;16" dur="1.8s" begin="-0.60s" repeatCount="indefinite"/><animate attributeName="y" values="214;194;218;202;214" dur="1.8s" begin="-0.60s" repeatCount="indefinite"/></rect>
+    <rect x="1082" y="214" width="10" height="16"><animate attributeName="height" values="16;36;12;28;16" dur="1.8s" begin="-0.75s" repeatCount="indefinite"/><animate attributeName="y" values="214;194;218;202;214" dur="1.8s" begin="-0.75s" repeatCount="indefinite"/></rect>
+    <rect x="1096" y="214" width="10" height="16"><animate attributeName="height" values="16;36;12;28;16" dur="1.8s" begin="-0.90s" repeatCount="indefinite"/><animate attributeName="y" values="214;194;218;202;214" dur="1.8s" begin="-0.90s" repeatCount="indefinite"/></rect>
+    <rect x="1110" y="214" width="10" height="16"><animate attributeName="height" values="16;36;12;28;16" dur="1.8s" begin="-1.05s" repeatCount="indefinite"/><animate attributeName="y" values="214;194;218;202;214" dur="1.8s" begin="-1.05s" repeatCount="indefinite"/></rect>
+    <rect x="1124" y="214" width="10" height="16"><animate attributeName="height" values="16;36;12;28;16" dur="1.8s" begin="-1.20s" repeatCount="indefinite"/><animate attributeName="y" values="214;194;218;202;214" dur="1.8s" begin="-1.20s" repeatCount="indefinite"/></rect>
+    <rect x="1138" y="214" width="10" height="16"><animate attributeName="height" values="16;36;12;28;16" dur="1.8s" begin="-1.35s" repeatCount="indefinite"/><animate attributeName="y" values="214;194;218;202;214" dur="1.8s" begin="-1.35s" repeatCount="indefinite"/></rect>
+    <rect x="1152" y="214" width="10" height="16"><animate attributeName="height" values="16;36;12;28;16" dur="1.8s" begin="-1.50s" repeatCount="indefinite"/><animate attributeName="y" values="214;194;218;202;214" dur="1.8s" begin="-1.50s" repeatCount="indefinite"/></rect>
+    <rect x="1166" y="214" width="10" height="16"><animate attributeName="height" values="16;36;12;28;16" dur="1.8s" begin="-1.65s" repeatCount="indefinite"/><animate attributeName="y" values="214;194;218;202;214" dur="1.8s" begin="-1.65s" repeatCount="indefinite"/></rect>
   </g>
 </svg>

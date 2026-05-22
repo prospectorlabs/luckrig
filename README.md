@@ -2,7 +2,7 @@
 
 **日本語** | [English](./README.en.md)
 
-![luckrig — オンプレミスLLM推論APIシェアリングプラットフォーム](./assets/banner.png)
+![luckrig — オンプレミスLLM推論APIシェアリングプラットフォーム](./assets/banner.svg)
 
 > 今この瞬間、誰かのオンプレミス環境で動いているLLM推論APIを、貢献ベースで試せる場所
 
