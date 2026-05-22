@@ -3,9 +3,9 @@
 luckrig Step 1.5では、ノード登録情報と観測値を分離するため、死活監視の結果をappend-only JSONLに保存します。
 
 - registry: `data/nodes.seed.json` — ノードが申告する静的情報
-- metrics: `data/metrics.jsonl` — trackerが観測した時系列データ（runtime生成、git管理対象外）
+- metrics: SQLite `data/luckrig.sqlite` の `metrics` table + JSONL mirror `data/metrics.jsonl`（runtime生成、git管理対象外）
 
-この分離により、ノード情報を編集しても観測履歴が壊れず、後でSQLiteや時系列DBへ移行しやすくなります。
+この分離により、ノード情報を編集しても観測履歴が壊れません。現実装ではSQLiteをdurable store、JSONLを互換mirrorとして使います。
 
 ## なぜtok/s / TTFTをここに入れないか
 

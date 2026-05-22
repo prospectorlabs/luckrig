@@ -66,7 +66,7 @@ luckrigのプライバシー設計は「頑張らなければ見えない」で�
 | public-key mode | Node/CLI E2Eおよびブラウザ試食。node public key / user public keyを使う | 実装済み |
 | legacy session-secret mode | node public keyがない古いノード向けfallback | 実装済み・後方互換扱い |
 
-本番では public-key mode を前提に、さらにfingerprint検証UXを追加する必要があります。
+public-key modeを前提にし、UIではfingerprint一致入力を必須にしています。さらに強い運用をする場合は、GitHub等の別経路でfingerprintを公開してください。
 
 ---
 
@@ -234,7 +234,7 @@ http://127.0.0.1:8787/
 | `LUCKRIG_HOST` | `127.0.0.1` | bind host |
 | `LUCKRIG_PORT` | `8787` | bind port |
 | `LUCKRIG_DEV` | unset | `1`でdev登録APIを有効化 |
-| `LUCKRIG_TRACKER_SECRET` | dev default | POC token署名secret |
+| `LUCKRIG_TRACKER_SECRET` | dev default | token署名secret |
 | `LUCKRIG_REGISTRY_PATH` | `data/nodes.seed.json` | node registry |
 | `LUCKRIG_METRICS_PATH` | `data/metrics.jsonl` | runtime metrics JSONL mirror |
 | `LUCKRIG_TOKEN_USAGE_PATH` | `data/token-usage.jsonl` | token usage JSONL mirror |
@@ -510,7 +510,7 @@ replay JSONには以下が入ります。
 注意:
 
 - POCのtoken推定は簡易的です
-- 本番ではmodel tokenizerに基づく計測が必要です
+- 現在のtok/sは簡易推定です。より正確にする場合はmodel tokenizer連携を追加してください
 - replayはlocal-firstであり、trackerへ自動送信しません
 
 ---

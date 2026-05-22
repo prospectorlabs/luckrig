@@ -1,6 +1,6 @@
 # luckrig — Technical Specification
 
-Status: **POC implemented / production spec draft**  
+Status: **v1/POC implemented / current technical spec**  
 Source of truth: [`CONCEPT.md`](./CONCEPT.md)  
 Related docs: [`README.md`](./README.md), [`docs/poc.md`](./docs/poc.md), [`docs/tracker-api.md`](./docs/tracker-api.md), [`docs/metrics-schema.md`](./docs/metrics-schema.md)
 
@@ -181,7 +181,7 @@ The POC encodes encrypted bytes into Unicode variation selectors.
 - Variation selectors provide invisible embedding inside a cover string.
 - Cover text has no security meaning.
 
-POC caveat:
+Implementation note:
 
 - Current POC supports public-key envelopes using X25519 + HKDF-SHA256 + AES-256-GCM and exposes `sha256:` SPKI fingerprints for public keys.
 - Legacy session-secret mode remains only for compatibility tests and should not be used as the preferred path.
@@ -222,7 +222,7 @@ Default local history path:
 | `LUCKRIG_HEALTH_INTERVAL_MS` | `30000` | Health probe interval |
 | `LUCKRIG_HEALTH_TIMEOUT_MS` | `2000` | Health probe timeout per node |
 | `LUCKRIG_DEV` | unset | Enables dev-only write endpoints when `1` |
-| `LUCKRIG_TRACKER_SECRET` | dev default | HMAC secret for POC token signing |
+| `LUCKRIG_TRACKER_SECRET` | dev default | HMAC secret for token signing |
 | `LUCKRIG_FULL_ACCESS_SCORE_THRESHOLD` | `1` | POC threshold for `contributor` tier |
 
 ### 4.2 Proxy environment variables
@@ -360,7 +360,7 @@ Rules:
 
 - Replay must include `schema_version`.
 - Replay is local-first and must not be uploaded to tracker by default.
-- POC token estimation uses an approximate character-based token count. Production must use model/tokenizer-aware counting if `tok_per_sec` is used for benchmarking.
+- Current token estimation uses an approximate character-based token count. Model/tokenizer-aware counting can be added later for more accurate benchmarking.
 
 ---
 
@@ -462,7 +462,7 @@ POC response:
 }
 ```
 
-POC caveat:
+Implementation note:
 
 - Preferred POC mode is `crypto_mode: public-key`; token carries public keys, never private keys.
 - Legacy `session-secret` mode remains for compatibility only.
@@ -489,7 +489,7 @@ Enabled only when `LUCKRIG_DEV=1`:
 POST /api/nodes
 ```
 
-Used by POC CLI before production registration flow exists.
+Used by CLI/dev registration flow in the current implementation.
 
 ### 6.9 Dev-only manual probe
 
@@ -555,11 +555,11 @@ Node operators can still see plaintext if they instrument:
 - debugger hooks
 - modified llama.cpp / ollama input path
 
-Therefore, luckrig must not claim production-grade end-to-end privacy against a malicious node operator.
+Therefore, luckrig must not claim malicious-node-proof end-to-end privacy.
 
 ### 7.3 Tracker trust model
 
-Production target from `CONCEPT.md`:
+Target trust model from `CONCEPT.md`:
 
 - Tracker alone cannot read plaintext.
 - Node alone cannot decrypt response intended for user private key.
@@ -571,11 +571,11 @@ POC simplification:
 - Tracker/proxy share HMAC secret for token verification.
 - Token carries user/node public keys, and the proxy decrypts with the node private key.
 - The client decrypts response with the user private key.
-- Tracker + node key-substitution risk remains; POC exposes fingerprints, but production must add verification UX / alternate trust channels.
+- Tracker + node key-substitution risk remains. The current UI displays fingerprints and requires exact fingerprint input before browser tasting; alternate trust channels remain optional hardening.
 
 ### 7.4 Token requirements
 
-POC token:
+Current token:
 
 - HMAC-SHA256 signed
 - Includes `node_id`, `user_id`, `tier`, `iat`, `exp`, `jti`, `crypto_mode`; public-key mode also includes `user_public_key` and optionally `node_public_key`
@@ -583,7 +583,7 @@ POC token:
 - Must reject expired token
 - Must reject node mismatch
 
-Production token:
+Hardening target for token/key trust:
 
 - Must prefer public-key mode.
 - Must expose public-key fingerprint and require user confirmation before browser tasting; stronger alternate trust channels are future hardening.
@@ -609,7 +609,7 @@ POC implementation:
 
 ### 8.2 Contribution score principles
 
-Production contribution score should include:
+Future full contribution score should include:
 
 - Existence score
 - Rarity score
@@ -637,7 +637,7 @@ Permanent access rights and Showcase ranking must remain separate systems.
 - `tok_per_sec` in POC replay uses approximate token estimation.
 - `ttft_ms` is carried in replay schema but not measured from a real upstream timing source in POC.
 
-### 9.3 Production rule
+### 9.3 Benchmark rule
 
 Benchmark fields must be derived from client/proxy timestamp evidence, not from node self-report.
 
@@ -694,7 +694,7 @@ Must verify:
 - replay save/load
 - invalid token rejection
 
-### 10.5 Current known sandbox constraint
+### 10.5 Current known Codex sandbox constraint
 
 In the Codex sandbox, binding local ports may fail with `EPERM`. Tests therefore call tracker/proxy handlers directly instead of relying on listening sockets.
 
@@ -799,7 +799,7 @@ src/shared/                shared token/base64url helpers
 
 ## 13. Future Hardening Backlog
 
-The v1/POC path is implemented and tested. Remaining items are future hardening or v6+ scope rather than blockers for the current implementation:
+The v1/POC path is implemented and tested. Remaining items below are hardening or v6+ scope, not incomplete current-scope implementation:
 
 1. Alternate trust channels for node public-key fingerprint publication.
 2. SQLite schema migration/admin tooling.

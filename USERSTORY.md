@@ -34,7 +34,7 @@ Goals:
 
 Non-goals:
 
-- Run arbitrary private production workloads.
+- Run arbitrary private business-critical workloads.
 - Receive consumer-grade trust guarantees.
 
 ### P2. Taster / Non-contributing Registered User
@@ -102,13 +102,13 @@ Goals:
 | E1 | Public discovery | Implemented as public node list UI/API |
 | E2 | Node registration | POC CLI + dev registration implemented |
 | E3 | Health and telemetry | Implemented via JSONL metrics |
-| E4 | Contribution-aware access | POC token/tier implemented |
+| E4 | Contribution-aware access | Token/tier, durable limited quota, and truncation implemented |
 | E5 | Privacy-aware tasting | POC public-key subtext + proxy implemented |
 | E6 | Queue UX / pseudo SSE | Implemented in proxy and browser tasting POC |
 | E7 | Local replay | Implemented, including browser replay JSON download |
 | E8 | Showcase and diversity | Initial rarity/Showcase visibility implemented |
 | E9 | Trust, disclaimers, and safety | Trust notice, fingerprint confirmation, and prompt filter implemented |
-| E10 | Production hardening | SQLite persistence, token quota, fingerprint gate implemented; future hardening remains |
+| E10 | Hardening | SQLite persistence, token quota, prompt filter, fingerprint gate implemented; optional hardening remains |
 
 ---
 
@@ -276,7 +276,7 @@ Acceptance criteria:
 
 - Tracker health telemetry does not treat node-reported tok/s as authoritative.
 - Replay schema includes `tok_per_sec` and `ttft_ms` fields.
-- Documentation states POC token estimation is approximate.
+- Documentation states current token estimation is approximate.
 
 Current evidence:
 
@@ -455,7 +455,7 @@ Acceptance criteria:
 - Chunk timestamps are captured.
 - Replay schema can drive playback.
 - POC documents approximate token estimation.
-- Production should use tokenizer-aware counting.
+- Current tok/s is approximate; tokenizer-aware counting is optional future improvement.
 
 Current evidence:
 
@@ -509,7 +509,7 @@ Acceptance criteria:
 
 - Docs state no SLA and no warranty.
 - UI should state experimental status.
-- Token/tasting flow should require users to understand trust limits before production.
+- Token/tasting flow requires users to understand trust limits before browser tasting.
 
 Current evidence:
 
@@ -525,7 +525,7 @@ As a **Maintainer**, I want luckrig positioned as a technical exploration space,
 Acceptance criteria:
 
 - Product stance says NSFW is not allowed.
-- Prompt filter is planned before broader public launch.
+- Prompt filter is implemented in proxy and can be tuned as examples appear.
 - Implementation details can evolve after real examples appear.
 
 Current evidence:
@@ -535,7 +535,7 @@ Current evidence:
 
 ---
 
-### E10. Production Hardening
+### E10. Hardening
 
 #### US-10.1 — Verify public key fingerprints
 
@@ -555,7 +555,7 @@ Current evidence:
 - Trust notice tells users to verify out-of-band before tasting
 - Browser tasting requires trust checkbox and exact fingerprint confirmation when a node key exists
 
-#### US-10.2 — Persist production data durably
+#### US-10.2 — Persist data durably
 
 As a **Tracker Operator**, I want durable storage for registry, metrics, token state, and contribution state, so that restart and growth do not depend on seed JSON files.
 
@@ -678,7 +678,7 @@ Success indicators:
 - US-8.1 Initial Showcase visibility
 - US-8.2 Tuning notes in node list
 - US-10.1 Public key fingerprint display/copy in UI
-- Browser tasting flow for Journey C using legacy session-secret browser POC mode
+- Browser tasting flow for Journey C using public-key mode when node key exists
 - US-9.1 Trust/disclaimer checkbox gate in browser tasting panel
 - US-10.3 Basic limited-tier output truncation in proxy
 - US-9.2 Basic prompt filtering in proxy
@@ -686,12 +686,13 @@ Success indicators:
 - Durable daily token quota for limited users
 - Browser public-key tasting when node key exists
 
-### Next recommended stories
+### Next recommended hardening stories
 
 1. **SQLite migration/admin tooling**
 2. **Quota management UI**
 3. **Tokenizer integration for replay benchmarks**
 4. **Real llama.cpp / ollama integration test profile**
+5. **Alternate-channel fingerprint publication guide**
 
 ---
 

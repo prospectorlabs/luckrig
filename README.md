@@ -64,9 +64,9 @@ npm test
 - metrics schema: [`docs/metrics-schema.md`](./docs/metrics-schema.md)
 - POC E2E: [`docs/poc.md`](./docs/poc.md)
 
-現段階のv1/POCとして、公開リスト、fingerprint表示/確認ゲート、ブラウザpublic-key試食POC、trust checkbox、死活監視、SQLite/JSONL永続化、durable token quota、prompt filter、POC token、node proxy、subtext、擬似SSE、replay保存までを一通りつないでいます。
+現段階のv1/POCとして、公開リスト、fingerprint表示/確認ゲート、ブラウザpublic-key試食POC、trust checkbox、死活監視、SQLite/JSONL永続化、durable token quota、prompt filter、token、node proxy、subtext、擬似SSE、replay保存までを一通りつないでいます。
 
 ## Status
 
-実装開始。POC（公開リスト + 死活監視 + health/telemetry JSONL + POC token + proxy + subtext + pseudo SSE + replay）をNode.js標準ライブラリのみで実装済み。コンセプト v5.2 確定。
+v1/POC実装完了。公開リスト、死活監視、SQLite/JSONL永続化、token、durable limited quota、prompt filter、node proxy、public-key subtext、browser public-key試食、pseudo SSE、replay保存までをNode.js標準ライブラリのみで実装済み。コンセプト v5.2 確定。
 

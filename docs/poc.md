@@ -21,7 +21,7 @@
 
 4. **トークン発行**
    - `POST /api/tokens`
-   - HMAC署名付きPOC token
+   - HMAC署名付きtoken
    - contribution scoreにより `limited` / `contributor` tierを返す
 
 5. **luckrig proxy層**
@@ -53,13 +53,13 @@ CONCEPT上の最終形：
 - tracker単独では平文を読めない
 - tracker + nodeが共謀すれば公開鍵すり替えが可能、というtrust modelを明示
 
-現在のPOC上の簡略化：
+現在の現在の実装上の簡略化：
 
 - tracker/proxyが共有するHMAC secretでtoken検証
 - token payloadには利用者公開鍵とノード公開鍵を含める（秘密鍵は含めない）
 - promptはノード公開鍵で暗号化し、proxyがノード秘密鍵で復号
 - responseは利用者公開鍵で暗号化し、clientが利用者秘密鍵で復号
-- tracker + nodeの共謀による公開鍵すり替えリスクはCONCEPT通り残る（POCはfingerprintを表示し、ブラウザ試食前に一致入力を要求する。別経路公開などの強い運用は今後のhardening）
+- tracker + nodeの共謀による公開鍵すり替えリスクはCONCEPT通り残る（POCはfingerprintを表示し、ブラウザ試食前に一致入力を要求する。別経路公開などの強い運用は任意のhardening）
 
 ## ローカル起動例
 
@@ -160,10 +160,10 @@ Public UIの各ノードカードには `試食する / browser POC` パネル�
 
 Node/CLI E2EとブラウザUIの両方でpublic-key modeを検証/実装済みです。node public keyがないノードのみlegacy session-secret modeにfallbackします。
 
-## 今後の強化項目
+## 任意の強化項目
 
 - filter ruleの運用チューニング
-- SQLite schema migration管理
+- SQLite schema migration/admin tooling
 - durable quotaの管理UI
 - 実model tokenizerによるtok/s精度向上
 - contribution scoreの本採点

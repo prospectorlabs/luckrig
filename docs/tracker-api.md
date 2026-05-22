@@ -1,8 +1,8 @@
 # Tracker API prototype
 
-このAPIは、CONCEPT.md §「最小実装の順序」に沿ったPOC trackerです。無登録者向け公開リスト、死活監視、health/telemetry履歴、POC token発行までを担当します。
+このAPIは、CONCEPT.md §「最小実装の順序」に沿ったv1/POC trackerです。無登録者向け公開リスト、死活監視、health/telemetry履歴、token発行、SQLite永続化、limited quotaを担当します。
 
-このAPIはprompt/response本文を保存しません。tok/s / TTFTはtracker health metricsではなく、replay側のchunk timestampを一次ソースにします。現在はPOC token、public-key handoff、fingerprint、SQLite永続化、limited quota、prompt filterまで実装済みです。
+このAPIはprompt/response本文を保存しません。tok/s / TTFTはtracker health metricsではなく、replay側のchunk timestampを一次ソースにします。現在はtoken、public-key handoff、fingerprint、SQLite永続化、limited quota、prompt filterまで実装済みです。
 
 ## 起動
 
@@ -107,7 +107,7 @@ health probeのJSONLを集約したサマリ。詳細schemaは [`metrics-schema.
 
 ### `POST /api/tokens`
 
-POC用の試食token発行。body:
+試食token発行。body:
 
 ```json
 {
@@ -120,11 +120,11 @@ POC用の試食token発行。body:
 }
 ```
 
-レスポンスはBearer token、期限、`crypto_mode`、node public key、public key fingerprint、contribution tierを含みます。`user_public_key` を指定した場合はpublic-key modeになり、session secretは返りません。legacyとしてsession-secret modeも残っています。productionでは公開鍵フィンガープリント検証を追加する前提です。
+レスポンスはBearer token、期限、`crypto_mode`、node public key、public key fingerprint、contribution tierを含みます。`user_public_key` を指定した場合はpublic-key modeになり、session secretは返りません。legacyとしてsession-secret modeも残っています。ブラウザ試食ではfingerprint一致入力を必須にしています。
 
 ### `GET /api/contribution/:user_id?score=1`
 
-POC用の貢献tier判定。`score >= LUCKRIG_FULL_ACCESS_SCORE_THRESHOLD` なら `contributor`。
+貢献tier判定。`score >= LUCKRIG_FULL_ACCESS_SCORE_THRESHOLD` なら `contributor`。
 
 ## Dev-only endpoints
 
