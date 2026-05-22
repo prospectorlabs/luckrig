@@ -42,6 +42,9 @@ tracker
 - Node registration CLI
 - Node-side proxy layer
 - Contribution-aware tasting token issuance
+- Multi-axis node contribution scoring
+- Auto-generated Showcase categories
+- Browser identity persistence for repeated tastings
 - subtext-based prompt / response hiding
 - Buffered generation with pseudo SSE playback
 - Local replay persistence
@@ -615,12 +618,12 @@ POC implementation:
 
 ### 8.2 Contribution score principles
 
-Future full contribution score should include:
+Current node contribution score includes the following POC components; future scoring can refine weights and add note reference analytics:
 
 - Existence score
 - Rarity score
-- Usage score
-- Discovery score
+- Usage score (token-issued count as current proxy)
+- Discovery score (distinct tasting users)
 - Tuning-note score
 
 Permanent access rights and Showcase ranking must remain separate systems.

@@ -124,14 +124,37 @@ function bytesToPem(bytes, label = 'PUBLIC KEY') {
 async function generateBrowserBoxKeyPair() {
   const pair = await crypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']);
   const publicSpki = await crypto.subtle.exportKey('spki', pair.publicKey);
+  const privatePkcs8 = await crypto.subtle.exportKey('pkcs8', pair.privateKey);
   return {
     publicKeyPem: bytesToPem(publicSpki),
+    privateKeyPem: bytesToPem(privatePkcs8, 'PRIVATE KEY'),
     privateKey: pair.privateKey,
   };
 }
 
 async function importX25519PublicKey(pem) {
   return crypto.subtle.importKey('spki', pemToBytes(pem), { name: 'X25519' }, false, []);
+}
+
+async function importX25519PrivateKey(pem) {
+  return crypto.subtle.importKey('pkcs8', pemToBytes(pem), { name: 'X25519' }, false, ['deriveBits']);
+}
+
+
+function randomIdentityId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(9));
+  return `browser-${base64urlEncode(bytes)}`;
+}
+
+async function getBrowserIdentity() {
+  const stored = JSON.parse(localStorage.getItem('luckrig.browserIdentity.v1') ?? 'null');
+  if (stored?.userId && stored?.publicKeyPem && stored?.privateKeyPem) {
+    return { ...stored, privateKey: await importX25519PrivateKey(stored.privateKeyPem) };
+  }
+  const keys = await generateBrowserBoxKeyPair();
+  const identity = { userId: randomIdentityId(), publicKeyPem: keys.publicKeyPem, privateKeyPem: keys.privateKeyPem };
+  localStorage.setItem('luckrig.browserIdentity.v1', JSON.stringify(identity));
+  return { ...identity, privateKey: keys.privateKey };
 }
 
 async function derivePublicKeyAesKey({ privateKey, publicKeyPem, salt, usage }) {
@@ -296,16 +319,17 @@ async function runBrowserTasting(node, fragment) {
   if (!prompt) throw new Error('prompt is required');
   if (!proxyUrl) throw new Error('proxy URL is required');
 
-  status.textContent = 'preparing browser key...';
+  status.textContent = 'preparing browser identity...';
+  const identity = await getBrowserIdentity();
   let browserKeys = null;
   if (hasNodePublicKey) {
-    browserKeys = await generateBrowserBoxKeyPair();
+    browserKeys = identity;
   }
 
   status.textContent = 'requesting token...';
   const tokenRequest = {
     node_id: node.id,
-    user_id: userId,
+    user_id: userId || identity.userId,
     contribution_score: contributionScore,
     ttl_sec: 300,
     ...(browserKeys ? { user_public_key: browserKeys.publicKeyPem, node_public_key: node.node_public_key } : {}),
@@ -454,6 +478,24 @@ function renderNode(node) {
   fragment.querySelector('.availability').textContent = node.availability_note || '稼働時間メモなし';
   fragment.querySelector('.note').textContent = node.tuning_note || 'チューニングノートなし';
 
+  const showcaseBadges = fragment.querySelector('.showcase-badges');
+  showcaseBadges.replaceChildren(...(node.showcase ?? []).map((entry) => {
+    const span = document.createElement('span');
+    span.textContent = entry.label;
+    span.title = entry.reason ?? '';
+    return span;
+  }));
+
+  const contribution = node.contribution;
+  fragment.querySelector('.contribution-panel').innerHTML = contribution ? `
+    <strong>contribution ${contribution.total.toFixed(2)}</strong>
+    <span>exist ${contribution.components.existence_score}</span>
+    <span>rare ${contribution.components.rarity_score}</span>
+    <span>use ${contribution.components.usage_score}</span>
+    <span>discover ${contribution.components.discovery_score}</span>
+    <span>note ${contribution.components.note_score}</span>
+  ` : '';
+
   const tags = fragment.querySelector('.tags');
   tags.replaceChildren(...node.tags.map((tag) => {
     const span = document.createElement('span');
@@ -514,6 +556,10 @@ function renderNode(node) {
   `;
 
   fragment.querySelector('.tasting-proxy-url').value = node.endpoint_url ?? '';
+  getBrowserIdentity().then((identity) => {
+    const input = fragment.querySelector('.tasting-user-id');
+    if (input && input.value === 'browser-poc') input.value = identity.userId;
+  }).catch(() => {});
   const runButton = fragment.querySelector('.run-tasting');
   const tastingStatus = fragment.querySelector('.tasting-status');
   runButton.addEventListener('click', async () => {

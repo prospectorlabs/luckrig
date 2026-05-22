@@ -257,3 +257,25 @@ dd { margin: 4px 0 0; font-weight: 650; overflow-wrap: anywhere; }
 .compare th { color: var(--muted); font-weight: 700; }
 .compare td { color: var(--text); }
 .compare tr:last-child td { border-bottom: 0; }
+.showcase-badges, .contribution-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.showcase-badges span {
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 11px;
+}
+.contribution-panel {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  background: rgba(255,255,255,.025);
+}
+.contribution-panel strong { color: var(--text); margin-right: 6px; }

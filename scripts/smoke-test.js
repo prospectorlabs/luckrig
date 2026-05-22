@@ -55,11 +55,11 @@ async function main() {
   if (!html.includes('node public key fingerprint')) {
     throw new Error('index page did not include fingerprint UI marker');
   }
-  if (!html.includes('browser POC') || !html.includes('tasting-trust') || !html.includes('fingerprint-confirm') || !html.includes('model-filter')) {
+  if (!html.includes('browser POC') || !html.includes('tasting-trust') || !html.includes('fingerprint-confirm') || !html.includes('model-filter') || !html.includes('showcase-badges') || !html.includes('contribution-panel')) {
     throw new Error('index page did not include browser tasting/trust/filter UI markers');
   }
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  if (!app.includes('visible rigs comparison') || !app.includes('queue: ${queueLabel}')) {
+  if (!app.includes('visible rigs comparison') || !app.includes('queue: ${queueLabel}') || !app.includes('luckrig.browserIdentity.v1')) {
     throw new Error('app did not include comparison/queue UI markers');
   }
 

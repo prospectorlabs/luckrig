@@ -520,7 +520,7 @@ replay JSONには以下が入ります。
 
 ## 14. 公開リストの見方
 
-ノードカードには以下が表示されます。公開リスト上部の model/GPU/min VRAM filter で、自分の環境に近いrigを絞り込めます。
+ノードカードには以下が表示されます。公開リスト上部の model/GPU/min VRAM filter で、自分の環境に近いrigを絞り込めます。ブラウザは `localStorage` に `luckrig.browserIdentity.v1` を保存し、同じuser id/keyを継続利用します。
 
 | 表示 | 意味 |
 | --- | --- |
@@ -533,6 +533,8 @@ replay JSONには以下が入ります。
 | node public key fingerprint | 公開鍵fingerprint |
 | samples / availability | health probe集計 |
 | queue | proxyのactive/waiting状態 |
+| contribution | existence/rarity/usage/discovery/noteの合算score |
+| Showcase badge | trackerが自動生成したShowcaseカテゴリ |
 
 デフォルト表示は高スペック順ではありません。CONCEPTに従い、希少性・Showcaseが見える順序です。
 
@@ -645,7 +647,7 @@ v1/POCとして一通り動きます。今後の強化項目は以下です。
 - durable quotaの管理UI
 - 実model tokenizer連携によるtok/s精度向上
 - Tailscale等を含む本番運用向けnode provider docsの拡充
-- contribution scoreの本採点
+- contribution scoreの重み調整/運用チューニング
 - v6以降の画像/音声系対応
 
 ---

@@ -102,11 +102,11 @@ Goals:
 | E1 | Public discovery | Implemented as public node list UI/API |
 | E2 | Node registration | POC CLI + dev registration implemented |
 | E3 | Health and telemetry | Implemented via JSONL metrics |
-| E4 | Contribution-aware access | Token/tier, durable limited quota, and truncation implemented |
+| E4 | Contribution-aware access | Token/tier, durable limited quota, truncation, and node contribution scoring implemented |
 | E5 | Privacy-aware tasting | POC public-key subtext + proxy implemented |
 | E6 | Queue UX / pseudo SSE | Implemented in proxy and browser tasting POC |
 | E7 | Local replay | Implemented, including browser replay JSON download |
-| E8 | Showcase and diversity | Initial rarity/Showcase visibility, environment filters, and comparison table implemented |
+| E8 | Showcase and diversity | Auto Showcase categories, rarity visibility, environment filters, and comparison table implemented |
 | E9 | Trust, disclaimers, and safety | Trust notice, fingerprint confirmation, and prompt filter implemented |
 | E10 | Hardening | SQLite persistence, token quota, prompt filter, fingerprint gate implemented; optional hardening remains |
 
@@ -688,6 +688,9 @@ Success indicators:
 - US-10.2 SQLite persistence for registry/metrics/token usage
 - Durable daily token quota for limited users
 - Browser public-key tasting when node key exists
+- Multi-axis node contribution score
+- Auto-generated Showcase categories
+- Persistent browser identity for repeated tastings
 
 ### Next recommended hardening stories
 

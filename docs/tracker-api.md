@@ -107,6 +107,25 @@ health probeのJSONLを集約したサマリ。詳細schemaは [`metrics-schema.
 
 1ノード分のmetrics summary。
 
+### `GET /api/contributions`
+
+ノードごとの多軸貢献スコアを返します。現在のPOC components:
+
+- existence score
+- rarity score
+- usage score（token発行数をproxy）
+- discovery score（distinct tasting users）
+- note score
+
+### `GET /api/showcase`
+
+trackerが自動生成したShowcaseカテゴリと該当ノードを返します。
+
+- lowest-vram
+- cpu-rig
+- apple-silicon
+- largest-context
+
 ### `POST /api/tokens`
 
 試食token発行。body:

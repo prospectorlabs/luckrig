@@ -166,5 +166,5 @@ Node/CLI E2EとブラウザUIの両方でpublic-key modeを検証/実装済み�
 - SQLite schema migration/admin tooling
 - durable quotaの管理UI
 - 実model tokenizerによるtok/s精度向上（現状はluckrig-heuristic-v1）
-- contribution scoreの本採点
+- contribution scoreの重み調整/運用チューニング
 - v6以降の画像/音声系対応

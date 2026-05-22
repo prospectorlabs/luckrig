@@ -118,6 +118,16 @@ async function main() {
   assert.equal(tokenResponse.json.node_public_key_fingerprint, publicKeyFingerprint(nodeKeys.publicKeyPem));
   assert.equal(tokenResponse.json.user_public_key_fingerprint, publicKeyFingerprint(userKeys.publicKeyPem));
 
+  const contributionList = await requestTracker({ method: 'GET', url: '/api/contributions' });
+  assert.equal(contributionList.statusCode, 200, contributionList.text);
+  assert.ok(Array.isArray(contributionList.json.scores));
+  assert.ok(contributionList.json.scores.some((score) => score.node_id === node.id));
+
+  const showcaseList = await requestTracker({ method: 'GET', url: '/api/showcase' });
+  assert.equal(showcaseList.statusCode, 200, showcaseList.text);
+  assert.ok(showcaseList.json.categories.length >= 1);
+  assert.ok(showcaseList.json.nodes.length >= 1);
+
   const tokenPayload = verifyTastingToken(tokenResponse.json.token, {
     secret: process.env.LUCKRIG_TRACKER_SECRET,
     expectedNodeId: node.id,

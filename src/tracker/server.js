@@ -36,6 +36,9 @@ const metricsSummaries = new Map();
 /** @type {Map<string, number>} */
 const tokenUsageDaily = new Map();
 
+/** @type {Array<object>} */
+const tokenUsageEvents = [];
+
 let sqliteDb = null;
 
 const MIME_TYPES = new Map([
@@ -451,6 +454,9 @@ function pruneTokenUsageMap({ now = new Date(), retentionDays = TOKEN_USAGE_RETE
       removed += 1;
     }
   }
+  for (let i = tokenUsageEvents.length - 1; i >= 0; i -= 1) {
+    if (tokenUsageEvents[i]?.day && tokenUsageEvents[i].day < cutoffKey) tokenUsageEvents.splice(i, 1);
+  }
   return removed;
 }
 
@@ -460,13 +466,16 @@ function getTokenUsage({ userId, tier = 'limited', day = dayKey() } = {}) {
 
 async function loadTokenUsage() {
   tokenUsageDaily.clear();
+  tokenUsageEvents.length = 0;
   // best-effort pruning after rebuilding the map
   const dbEvents = await loadTokenUsageFromDb();
   if (dbEvents.length > 0) {
     for (const event of dbEvents) {
+      tokenUsageEvents.push(event);
       const key = tokenUsageKey({ userId: event.user_id, tier: event.tier, day: event.day });
       tokenUsageDaily.set(key, (tokenUsageDaily.get(key) ?? 0) + 1);
     }
+    pruneTokenUsageMap();
     return;
   }
 
@@ -482,6 +491,7 @@ async function loadTokenUsage() {
     try {
       const event = JSON.parse(line);
       if (event?.schema_version === 1 && event?.type === 'token_issued') {
+        tokenUsageEvents.push(event);
         const key = tokenUsageKey({ userId: event.user_id, tier: event.tier, day: event.day });
         tokenUsageDaily.set(key, (tokenUsageDaily.get(key) ?? 0) + 1);
         await appendTokenUsageDb(event);
@@ -501,6 +511,7 @@ async function appendTokenUsage(event) {
     day: dayKey(),
     ...event,
   };
+  tokenUsageEvents.push(normalized);
   const key = tokenUsageKey({ userId: normalized.user_id, tier: normalized.tier, day: normalized.day });
   tokenUsageDaily.set(key, (tokenUsageDaily.get(key) ?? 0) + 1);
   await appendTokenUsageDb(normalized);
@@ -596,6 +607,8 @@ function nodePublicKeyFingerprint(node) {
 }
 
 function publicNode(node, rarityScore) {
+  const contribution = computeNodeContributionScores().get(node.id);
+  const showcase = computeShowcases().byNode.get(node.id) ?? [];
   return {
     id: node.id,
     display_name: node.display_name,
@@ -614,9 +627,77 @@ function publicNode(node, rarityScore) {
     created_at: node.created_at,
     updated_at: node.updated_at,
     rarity_score: rarityScore,
+    showcase,
+    contribution,
     health: node.health,
     observations: getMetricsSummary(node.id),
   };
+}
+
+
+function nodeAgeDays(node, now = Date.now()) {
+  const created = Date.parse(node.created_at ?? nowIso());
+  if (!Number.isFinite(created)) return 0;
+  return Math.max(0, (now - created) / 86400000);
+}
+
+function usageEventsForNode(nodeId) {
+  return tokenUsageEvents.filter((event) => event.node_id === nodeId);
+}
+
+function computeNodeContributionScores() {
+  const rarity = computeRarityScores();
+  const result = new Map();
+  for (const node of nodes.values()) {
+    const events = usageEventsForNode(node.id);
+    const users = new Set(events.map((event) => event.user_id).filter(Boolean));
+    const existenceScore = Number(Math.min(10, nodeAgeDays(node) * 0.2).toFixed(3));
+    const rarityScore = Number(((rarity.get(node.id) ?? 0) * 5).toFixed(3));
+    const usageScore = Number(Math.min(20, events.length * 0.5).toFixed(3));
+    const discoveryScore = Number(Math.min(20, users.size * 2).toFixed(3));
+    const noteScore = node.tuning_note ? Number(Math.min(10, 1 + node.tuning_note.length / 120).toFixed(3)) : 0;
+    const total = Number((existenceScore + rarityScore + usageScore + discoveryScore + noteScore).toFixed(3));
+    result.set(node.id, {
+      node_id: node.id,
+      total,
+      tier: total >= FULL_ACCESS_SCORE_THRESHOLD ? 'contributor' : 'limited',
+      components: {
+        existence_score: existenceScore,
+        rarity_score: rarityScore,
+        usage_score: usageScore,
+        discovery_score: discoveryScore,
+        note_score: noteScore,
+      },
+      evidence: {
+        token_issued_count: events.length,
+        distinct_tasting_users: users.size,
+        age_days: Number(nodeAgeDays(node).toFixed(3)),
+        has_tuning_note: Boolean(node.tuning_note),
+      },
+    });
+  }
+  return result;
+}
+
+function computeShowcases() {
+  const list = [...nodes.values()];
+  const byVram = list.filter((node) => Number.isFinite(node.vram_gb)).sort((a, b) => a.vram_gb - b.vram_gb);
+  const lowSpec = byVram[0] ?? null;
+  const cpu = list.find((node) => /cpu|raspberry|pi/i.test(node.gpu));
+  const apple = list.find((node) => /apple|m\d+\s*max|m\d+\s*pro/i.test(node.gpu));
+  const highCtx = [...list].sort((a, b) => (b.context_length ?? 0) - (a.context_length ?? 0))[0] ?? null;
+  const categories = [
+    { id: 'lowest-vram', label: '最低VRAM/CPU Showcase', node_id: lowSpec?.id ?? null, reason: lowSpec ? `${lowSpec.gpu} / ${lowSpec.vram_gb}GB` : null },
+    { id: 'cpu-rig', label: 'CPU / Raspberry Pi Showcase', node_id: cpu?.id ?? null, reason: cpu?.gpu ?? null },
+    { id: 'apple-silicon', label: 'Apple Silicon Showcase', node_id: apple?.id ?? null, reason: apple?.gpu ?? null },
+    { id: 'largest-context', label: '最大context Showcase', node_id: highCtx?.id ?? null, reason: highCtx ? `${highCtx.context_length} ctx` : null },
+  ].filter((entry, index, arr) => entry.node_id && arr.findIndex((x) => x.id === entry.id) === index);
+  const byNode = new Map();
+  for (const entry of categories) {
+    if (!byNode.has(entry.node_id)) byNode.set(entry.node_id, []);
+    byNode.get(entry.node_id).push({ id: entry.id, label: entry.label, reason: entry.reason });
+  }
+  return { categories, byNode };
 }
 
 function listPublicNodes({ status } = {}) {
@@ -880,6 +961,26 @@ async function handleApi(req, res, url) {
     return;
   }
 
+
+  if (url.pathname === '/api/contributions' && req.method === 'GET') {
+    json(res, 200, {
+      schema_version: 1,
+      threshold: FULL_ACCESS_SCORE_THRESHOLD,
+      scores: [...computeNodeContributionScores().values()].sort((a, b) => b.total - a.total),
+    }, corsHeaders());
+    return;
+  }
+
+  if (url.pathname === '/api/showcase' && req.method === 'GET') {
+    const showcase = computeShowcases();
+    json(res, 200, {
+      schema_version: 1,
+      categories: showcase.categories,
+      nodes: showcase.categories.map((entry) => publicNode(nodes.get(entry.node_id), computeRarityScores().get(entry.node_id) ?? 0)),
+    }, corsHeaders());
+    return;
+  }
+
   const metricsMatch = url.pathname.match(/^\/api\/metrics\/([^/]+)$/);
   if (metricsMatch && req.method === 'GET') {
     const id = metricsMatch[1];
@@ -981,11 +1082,14 @@ export {
   TOKEN_USAGE_PATH,
   DB_PATH,
   REGISTRY_PATH,
+  computeNodeContributionScores,
+  computeShowcases,
   contributionStatus,
   handleRequest,
   getTokenUsage,
   pruneTokenUsageMap,
   tokenUsageDaily,
+  tokenUsageEvents,
   TOKEN_USAGE_RETENTION_DAYS,
   listMetricsSummaries,
   listPublicNodes,
