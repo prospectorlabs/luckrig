@@ -1,0 +1,33 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Logs
+*.log
+logs/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# luckrig local data (must never be committed)
+.luckrig/
+**/history/*.json
+
+# Build outputs (placeholders for future stacks)
+dist/
+build/
+out/
+target/
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
