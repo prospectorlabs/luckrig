@@ -2,7 +2,13 @@ const nodesEl = document.querySelector('#nodes');
 const summaryEl = document.querySelector('#summary');
 const refreshButton = document.querySelector('#refresh');
 const statusFilter = document.querySelector('#status-filter');
+const modelFilter = document.querySelector('#model-filter');
+const gpuFilter = document.querySelector('#gpu-filter');
+const minVramFilter = document.querySelector('#min-vram-filter');
+const compareEl = document.querySelector('#compare');
 const template = document.querySelector('#node-card-template');
+
+let allNodes = [];
 
 const statusLabels = {
   available: 'available',
@@ -220,13 +226,28 @@ function parseSseText(text) {
   return { events, encryptedContent, chunk_timestamps };
 }
 
-function estimateTokens(text) {
+function tokenizerFamily(modelName = '') {
+  const name = String(modelName).toLowerCase();
+  if (name.includes('qwen')) return 'qwen';
+  if (name.includes('llama')) return 'llama';
+  if (name.includes('gpt')) return 'gpt';
+  return 'generic';
+}
+
+function estimateTokens(text, { modelName = '' } = {}) {
   const value = String(text ?? '').trim();
-  return value ? Math.max(1, Math.ceil(value.length / 4)) : 0;
+  if (!value) return { tokens: 0, tokenizer: 'luckrig-heuristic-v1', model_family: tokenizerFamily(modelName) };
+  const family = tokenizerFamily(modelName);
+  const cjk = (value.match(/[぀-ヿ㐀-鿿가-힯]/g) ?? []).length;
+  const words = (value.match(/[A-Za-z0-9_]+(?:[-'][A-Za-z0-9_]+)?/g) ?? [])
+    .reduce((sum, word) => sum + Math.max(1, Math.ceil(word.length / (family === 'qwen' ? 3.6 : family === 'llama' ? 3.8 : 4.0))), 0);
+  const punct = (value.match(/[.,!?;:()[\]{}<>"'`~@#$%^&*+=|\/\-、。！？：；「」『』（）]/g) ?? []).length;
+  return { tokens: Math.max(1, cjk + words + punct), tokenizer: 'luckrig-heuristic-v1', model_family: family };
 }
 
 function buildReplayRecordBrowser(envelope, { chunk_timestamps = [], ttft_ms = null } = {}) {
-  const outputTokens = estimateTokens(envelope.response);
+  const tokenEstimate = estimateTokens(envelope.response, { modelName: envelope.model_name });
+  const outputTokens = tokenEstimate.tokens;
   const tokPerSec = envelope.generation_sec > 0 ? Number((outputTokens / envelope.generation_sec).toFixed(3)) : null;
   return {
     schema_version: 1,
@@ -237,7 +258,12 @@ function buildReplayRecordBrowser(envelope, { chunk_timestamps = [], ttft_ms = n
     queue_wait_sec: envelope.queue_wait_sec ?? 0,
     generation_sec: envelope.generation_sec ?? 0,
     tok_per_sec: tokPerSec,
-    ttft_ms,
+    output_tokens: outputTokens,
+    tokenizer: tokenEstimate.tokenizer,
+    tokenizer_model_family: tokenEstimate.model_family,
+    ttft_ms: envelope.proxy_ttft_ms ?? ttft_ms,
+    network_ttft_ms: ttft_ms,
+    proxy_ttft_ms: envelope.proxy_ttft_ms ?? null,
     chunk_timestamps,
     limited_output_truncated: envelope.limited_output_truncated ?? false,
   };
@@ -333,6 +359,65 @@ async function runBrowserTasting(node, fragment) {
   status.textContent = `done: ${replay.tok_per_sec ?? '—'} tok/s, crypto=${tokenPayload.crypto_mode}, truncated=${replay.limited_output_truncated}`;
 }
 
+
+function includesIgnoreCase(value, needle) {
+  if (!needle) return true;
+  return String(value ?? '').toLowerCase().includes(String(needle).toLowerCase());
+}
+
+function applyClientFilters(nodes) {
+  const model = modelFilter.value.trim();
+  const gpu = gpuFilter.value.trim();
+  const minVram = minVramFilter.value === '' ? null : Number(minVramFilter.value);
+  return nodes.filter((node) => {
+    if (!includesIgnoreCase(node.model_name, model)) return false;
+    if (!includesIgnoreCase(node.gpu, gpu)) return false;
+    if (Number.isFinite(minVram) && (node.vram_gb ?? 0) < minVram) return false;
+    return true;
+  });
+}
+
+function renderCompare(nodes) {
+  const rows = nodes.slice(0, 8);
+  if (rows.length === 0) {
+    compareEl.innerHTML = '';
+    return;
+  }
+  compareEl.innerHTML = `
+    <h2>visible rigs comparison</h2>
+    <div class="compare-table-wrap">
+      <table>
+        <thead><tr><th>model</th><th>GPU</th><th>VRAM</th><th>ctx</th><th>status</th><th>queue</th><th>availability</th></tr></thead>
+        <tbody>
+          ${rows.map((node) => {
+            const q = node.observations?.last_queue;
+            const queue = q ? `${formatValue(q.active)} active / ${formatValue(q.depth)} wait` : '—';
+            return `<tr>
+              <td>${node.model_name}</td>
+              <td>${node.gpu}</td>
+              <td>${node.vram_gb === 0 ? 'shared / CPU' : formatValue(node.vram_gb, 'GB')}</td>
+              <td>${formatValue(node.context_length)}</td>
+              <td>${node.health?.status ?? 'unknown'}</td>
+              <td>${queue}</td>
+              <td>${node.observations?.availability_ratio === null || node.observations?.availability_ratio === undefined ? '—' : `${Math.round(node.observations.availability_ratio * 100)}%`}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderVisibleNodes() {
+  const visible = applyClientFilters(allNodes);
+  renderSummary(visible);
+  renderCompare(visible);
+  nodesEl.replaceChildren(...visible.map(renderNode));
+  if (visible.length === 0) {
+    nodesEl.innerHTML = '<p class="empty">該当するノードはありません。</p>';
+  }
+}
+
 function renderSummary(nodes) {
   const counts = nodes.reduce((acc, node) => {
     acc[node.health.status] = (acc[node.health.status] ?? 0) + 1;
@@ -412,6 +497,8 @@ function renderNode(node) {
   const observations = node.observations ?? {};
   const memory = observations.last_memory;
   const gpu = observations.last_gpu;
+  const queue = observations.last_queue;
+  const queueLabel = queue ? `${formatValue(queue.active)} active / ${formatValue(queue.depth)} wait` : '—';
   const memoryLabel = memory?.used_mb && memory?.total_mb
     ? `${Math.round(memory.used_mb)} / ${Math.round(memory.total_mb)} MB`
     : '—';
@@ -423,6 +510,7 @@ function renderNode(node) {
     <span>availability: ${observations.availability_ratio === null || observations.availability_ratio === undefined ? '—' : `${Math.round(observations.availability_ratio * 100)}%`}</span>
     <span>memory: ${memoryLabel}</span>
     <span>gpu util: ${gpuLabel}</span>
+    <span>queue: ${queueLabel}</span>
   `;
 
   fragment.querySelector('.tasting-proxy-url').value = node.endpoint_url ?? '';
@@ -451,11 +539,8 @@ async function loadNodes() {
     const res = await fetch(`/api/nodes?status=${encodeURIComponent(status)}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const payload = await res.json();
-    renderSummary(payload.nodes);
-    nodesEl.replaceChildren(...payload.nodes.map(renderNode));
-    if (payload.nodes.length === 0) {
-      nodesEl.innerHTML = '<p class="empty">該当するノードはありません。</p>';
-    }
+    allNodes = payload.nodes;
+    renderVisibleNodes();
   } catch (error) {
     nodesEl.innerHTML = `<p class="empty error">failed to load nodes: ${error.message}</p>`;
   } finally {
@@ -466,5 +551,8 @@ async function loadNodes() {
 
 refreshButton.addEventListener('click', loadNodes);
 statusFilter.addEventListener('change', loadNodes);
+modelFilter.addEventListener('input', renderVisibleNodes);
+gpuFilter.addEventListener('input', renderVisibleNodes);
+minVramFilter.addEventListener('input', renderVisibleNodes);
 loadNodes();
 setInterval(loadNodes, 30_000);

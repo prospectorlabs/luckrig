@@ -106,7 +106,7 @@ Goals:
 | E5 | Privacy-aware tasting | POC public-key subtext + proxy implemented |
 | E6 | Queue UX / pseudo SSE | Implemented in proxy and browser tasting POC |
 | E7 | Local replay | Implemented, including browser replay JSON download |
-| E8 | Showcase and diversity | Initial rarity/Showcase visibility implemented |
+| E8 | Showcase and diversity | Initial rarity/Showcase visibility, environment filters, and comparison table implemented |
 | E9 | Trust, disclaimers, and safety | Trust notice, fingerprint confirmation, and prompt filter implemented |
 | E10 | Hardening | SQLite persistence, token quota, prompt filter, fingerprint gate implemented; optional hardening remains |
 
@@ -675,6 +675,9 @@ Success indicators:
 - US-6.2 Preserve OpenAI-compatible shape
 - US-7.1 Save replay locally
 - US-7.2 Replay generation timing schema
+- Proxy queue depth/active visibility
+- Environment filter and visible rigs comparison table
+- Heuristic tokenizer-based replay tok/s estimate
 - US-8.1 Initial Showcase visibility
 - US-8.2 Tuning notes in node list
 - US-10.1 Public key fingerprint display/copy in UI
@@ -690,7 +693,7 @@ Success indicators:
 
 1. **SQLite migration/admin tooling**
 2. **Quota management UI**
-3. **Tokenizer integration for replay benchmarks**
+3. **Full tokenizer integration for replay benchmarks**
 4. **Real llama.cpp / ollama integration test profile**
 5. **Alternate-channel fingerprint publication guide**
 

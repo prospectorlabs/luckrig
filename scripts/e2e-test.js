@@ -159,6 +159,10 @@ async function main() {
   assert.equal(replay.response, `mock:${prompt}`);
   assert.equal(replay.node_id, node.id);
   assert.ok(replay.tok_per_sec === null || replay.tok_per_sec >= 0);
+  assert.ok(replay.output_tokens > 0);
+  assert.equal(replay.tokenizer, 'luckrig-heuristic-v1');
+  assert.equal(typeof replay.proxy_ttft_ms, 'number');
+  assert.ok(proxyResult.response_envelope.queue_snapshot);
 
   const historyDir = await mkdtemp(path.join(os.tmpdir(), 'luckrig-e2e-history-'));
   const replayPath = await saveReplayRecord(replay, { historyDir, date: new Date('2026-05-22T07:00:00.000Z') });
@@ -190,6 +194,7 @@ async function main() {
   });
   const limitedReplay = replayFromProxyResult(limitedProxyResult, { sessionSecret: limitedTokenResponse.json.session_secret, ttft_ms: 0 });
   assert.equal(limitedReplay.limited_output_truncated, true);
+  assert.ok(limitedReplay.output_tokens > 0);
   assert.match(limitedReplay.response, /limited tasting output truncated/);
 
   const blockedPromptBody = buildEncryptedChatBody({ prompt: 'NSFW erotic content test', sessionSecret: limitedTokenResponse.json.session_secret, stream: true });
@@ -229,6 +234,26 @@ async function main() {
   await rm(historyDir, { recursive: true, force: true });
   await rm(process.env.LUCKRIG_METRICS_PATH, { force: true });
   await rm(process.env.LUCKRIG_TOKEN_USAGE_PATH, { force: true });
+
+  const delayedFetch = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    return {
+      ok: true,
+      async json() {
+        return { choices: [{ message: { content: 'queued upstream response' } }] };
+      },
+    };
+  };
+  const queuedBodyA = buildEncryptedChatBody({ prompt: 'queue-a', nodePublicKey: tokenResponse.json.node_public_key, stream: true });
+  const queuedBodyB = buildEncryptedChatBody({ prompt: 'queue-b', nodePublicKey: tokenResponse.json.node_public_key, stream: true });
+  const [queuedA, queuedB] = await Promise.all([
+    processChatCompletion({ body: queuedBodyA, authHeader: `Bearer ${tokenResponse.json.token}`, nodeId: node.id, trackerSecret: process.env.LUCKRIG_TRACKER_SECRET, nodePrivateKey: nodeKeys.privateKeyPem, upstreamUrl: 'http://upstream.test/v1', fetchImpl: delayedFetch }),
+    processChatCompletion({ body: queuedBodyB, authHeader: `Bearer ${tokenResponse.json.token}`, nodeId: node.id, trackerSecret: process.env.LUCKRIG_TRACKER_SECRET, nodePrivateKey: nodeKeys.privateKeyPem, upstreamUrl: 'http://upstream.test/v1', fetchImpl: delayedFetch }),
+  ]);
+  assert.equal(queuedA.kind, 'sse');
+  assert.equal(queuedB.kind, 'sse');
+  assert.equal(Math.max(queuedA.response_envelope.queue_wait_sec, queuedB.response_envelope.queue_wait_sec) > 0, true);
+  assert.equal(queuedA.response_envelope.proxy_ttft_ms >= 0, true);
 
   // Plaintext-only messages must be rejected even when no subtext payload is present (CONCEPT trust model).
   await assert.rejects(

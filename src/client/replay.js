@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { decryptJsonFromSubtext, decryptJsonFromSubtextWithPrivateKey } from '../subtext/index.js';
+import { estimateTokenCount } from '../shared/tokenizer.js';
 
 export const DEFAULT_HISTORY_DIR = path.join(os.homedir(), '.luckrig', 'history');
 
@@ -14,11 +15,8 @@ function timestampForFilename(date = new Date()) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
 
-function estimateTokens(text) {
-  const s = String(text ?? '').trim();
-  if (!s) return 0;
-  // POC approximation. Real implementation should use the model tokenizer.
-  return Math.max(1, Math.ceil(s.length / 4));
+function estimateTokens(text, { modelName } = {}) {
+  return estimateTokenCount(text, { modelName });
 }
 
 export function parsePseudoSseChunks(chunks) {
@@ -55,8 +53,11 @@ export function buildReplayRecord({
   chunk_timestamps = [],
   created_at = new Date().toISOString(),
   limited_output_truncated = false,
+  model_name = '',
+  proxy_ttft_ms = null,
 } = {}) {
-  const outputTokens = estimateTokens(response);
+  const tokenEstimate = estimateTokens(response, { modelName: model_name });
+  const outputTokens = tokenEstimate.tokens;
   const tokPerSec = generation_sec > 0 ? Number((outputTokens / generation_sec).toFixed(3)) : null;
   return {
     schema_version: 1,
@@ -67,7 +68,12 @@ export function buildReplayRecord({
     queue_wait_sec,
     generation_sec,
     tok_per_sec: tokPerSec,
-    ttft_ms,
+    output_tokens: outputTokens,
+    tokenizer: tokenEstimate.tokenizer,
+    tokenizer_model_family: tokenEstimate.model_family,
+    ttft_ms: proxy_ttft_ms ?? ttft_ms,
+    network_ttft_ms: ttft_ms,
+    proxy_ttft_ms,
     chunk_timestamps,
     limited_output_truncated,
   };
@@ -82,9 +88,11 @@ export function replayFromEncryptedSseChunks(chunks, { sessionSecret, userPrivat
     prompt: envelope.prompt?.prompt ?? envelope.prompt,
     response: envelope.response,
     node_id: envelope.node_id,
+    model_name: envelope.model_name ?? '',
     queue_wait_sec: envelope.queue_wait_sec,
     generation_sec: envelope.generation_sec,
     ttft_ms,
+    proxy_ttft_ms: envelope.proxy_ttft_ms ?? null,
     chunk_timestamps,
     limited_output_truncated: envelope.limited_output_truncated ?? false,
   });

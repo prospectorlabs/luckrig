@@ -25,6 +25,18 @@
             <option value="unknown">unknown</option>
           </select>
         </label>
+        <label class="filter">
+          <span>model</span>
+          <input id="model-filter" type="search" placeholder="Qwen / llama..." />
+        </label>
+        <label class="filter">
+          <span>GPU</span>
+          <input id="gpu-filter" type="search" placeholder="RTX / M3 / CPU" />
+        </label>
+        <label class="filter">
+          <span>min VRAM</span>
+          <input id="min-vram-filter" type="number" min="0" step="1" placeholder="GB" />
+        </label>
       </div>
     </header>
 
@@ -36,6 +48,7 @@
       </section>
 
       <section class="summary" id="summary" aria-live="polite"></section>
+      <section class="compare" id="compare" aria-live="polite"></section>
       <section class="nodes" id="nodes" aria-live="polite"></section>
     </main>
 

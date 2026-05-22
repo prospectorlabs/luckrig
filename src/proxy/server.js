@@ -18,6 +18,10 @@ const NODE_ID = process.env.LUCKRIG_NODE_ID ?? 'local-poc-node';
 const TRACKER_SECRET = process.env.LUCKRIG_TRACKER_SECRET ?? 'luckrig-dev-secret-change-me';
 const UPSTREAM_URL = process.env.LUCKRIG_UPSTREAM_URL ?? '';
 const NODE_PRIVATE_KEY = process.env.LUCKRIG_NODE_PRIVATE_KEY ?? '';
+const MAX_ACTIVE_REQUESTS = Math.max(1, Number.parseInt(process.env.LUCKRIG_MAX_ACTIVE_REQUESTS ?? '1', 10));
+
+const queueState = { active: 0, waiting: 0, max_active: MAX_ACTIVE_REQUESTS };
+const queueWaiters = [];
 
 function corsHeaders(extra = {}) {
   return {
@@ -73,6 +77,31 @@ function extractSubtextMessage(body) {
   return subtextMessage;
 }
 
+
+function queueSnapshot() {
+  return { ...queueState, depth: queueState.waiting };
+}
+
+async function acquireQueueSlot() {
+  if (queueState.active < queueState.max_active) {
+    queueState.active += 1;
+    return;
+  }
+  queueState.waiting += 1;
+  await new Promise((resolve) => queueWaiters.push(resolve));
+  queueState.waiting -= 1;
+  // The releasing request transfers its active slot directly to this waiter.
+}
+
+function releaseQueueSlot() {
+  const next = queueWaiters.shift();
+  if (next) {
+    queueMicrotask(next);
+    return;
+  }
+  queueState.active = Math.max(0, queueState.active - 1);
+}
+
 function completionTextFromUpstreamResponse(responseBody) {
   const choice = responseBody?.choices?.[0];
   return choice?.message?.content ?? choice?.text ?? responseBody?.response ?? '';
@@ -85,6 +114,7 @@ async function mockGenerate({ prompt }) {
   return {
     text: `mock:${userText}`,
     upstream: 'mock',
+    upstream_ttft_ms: 0,
   };
 }
 
@@ -101,16 +131,19 @@ async function callUpstream({ body, prompt, upstreamUrl = UPSTREAM_URL, fetchImp
     messages: [{ role: 'user', content: promptText }],
   };
 
+  const started = performance.now();
   const res = await fetchImpl(upstreamUrl.replace(/\/$/, '') + '/chat/completions', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(upstreamBody),
   });
+  const upstreamTtftMs = Math.round(performance.now() - started);
   if (!res.ok) throw new Error(`upstream HTTP ${res.status}`);
   const responseBody = await res.json();
   return {
     text: completionTextFromUpstreamResponse(responseBody),
     upstream: upstreamUrl,
+    upstream_ttft_ms: upstreamTtftMs,
   };
 }
 
@@ -159,9 +192,16 @@ export async function processChatCompletion({
   const promptPolicy = assertPromptAllowed(prompt);
 
   const queuedAt = performance.now();
-  // POC queue UX: buffer upstream response fully, then emit pseudo SSE in one pass.
+  await acquireQueueSlot();
+  // Queue UX: wait for the node's available generation slot, then buffer upstream
+  // response fully before emitting encrypted pseudo SSE.
   const generationStartedAt = performance.now();
-  const upstream = await callUpstream({ body, prompt, upstreamUrl, fetchImpl });
+  let upstream;
+  try {
+    upstream = await callUpstream({ body, prompt, upstreamUrl, fetchImpl });
+  } finally {
+    releaseQueueSlot();
+  }
   const tiered = applyTierPolicy(upstream.text, tokenPayload);
   const generationSec = (performance.now() - generationStartedAt) / 1000;
   const queueWaitSec = (generationStartedAt - queuedAt) / 1000;
@@ -170,11 +210,14 @@ export async function processChatCompletion({
     schema_version: 1,
     node_id: nodeId,
     prompt,
-      prompt_policy: promptPolicy,
+    prompt_policy: promptPolicy,
     response: tiered.text,
+    model_name: body?.model ?? '',
     limited_output_truncated: tiered.limited,
     queue_wait_sec: Number(queueWaitSec.toFixed(3)),
     generation_sec: Number(generationSec.toFixed(3)),
+    proxy_ttft_ms: upstream.upstream_ttft_ms ?? null,
+    queue_snapshot: queueSnapshot(),
     upstream: upstream.upstream,
   };
   const encryptedResponseText = cryptoMode === 'public-key'
@@ -228,7 +271,7 @@ export async function handleProxyRequest(req, res, options = {}) {
         node_id: options.nodeId ?? NODE_ID,
         engine: { name: 'luckrig-proxy', version: '0.0.0', backend: options.upstreamUrl || UPSTREAM_URL ? 'openai-compatible' : 'mock' },
         crypto_modes: ['public-key', 'session-secret'],
-        queue: { depth: 0, active: 0 },
+        queue: queueSnapshot(),
         error_rate: 0,
       });
       return;
@@ -282,4 +325,4 @@ const isEntrypoint = process.argv[1]
 
 if (isEntrypoint) startProxyServer();
 
-export { createMockUpstreamServer };
+export { createMockUpstreamServer, queueSnapshot, acquireQueueSlot, releaseQueueSlot };

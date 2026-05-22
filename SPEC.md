@@ -37,6 +37,8 @@ tracker
 - Public node listing
 - Liveness monitoring
 - Basic telemetry collection
+- Queue depth/active visibility
+- Environment filters and comparison table
 - Node registration CLI
 - Node-side proxy layer
 - Contribution-aware tasting token issuance
@@ -235,6 +237,7 @@ Default local history path:
 | `LUCKRIG_TRACKER_SECRET` | dev default | HMAC secret shared with tracker in POC |
 | `LUCKRIG_UPSTREAM_URL` | unset | OpenAI-compatible upstream base URL. If unset, proxy uses mock generation |
 | `LUCKRIG_NODE_PRIVATE_KEY` | unset | PEM private key used to decrypt public-key subtext prompts |
+| `LUCKRIG_MAX_ACTIVE_REQUESTS` | `1` | Max concurrent upstream generations per proxy; extra requests wait in queue |
 | `LUCKRIG_LIMITED_OUTPUT_CHARS` | `240` | POC truncation length for limited-tier output |
 | `LUCKRIG_LIMITED_TOKENS_PER_DAY` | `5` | Daily token quota for limited-tier users |
 | `LUCKRIG_TOKEN_USAGE_RETENTION_DAYS` | `7` | Days to keep token usage entries in-memory before purging |
@@ -627,6 +630,11 @@ Permanent access rights and Showcase ranking must remain separate systems.
 ## 9. Benchmarking and Observability
 
 ### 9.1 Implemented now
+
+- Proxy queue snapshot (`active`, `waiting/depth`, `max_active`)
+- Proxy-side TTFT approximation (`proxy_ttft_ms`) captured before pseudo SSE
+- Replay `network_ttft_ms` separated from proxy-side TTFT
+- `luckrig-heuristic-v1` output token estimate with model-family hint
 
 - Health status
 - Probe latency
