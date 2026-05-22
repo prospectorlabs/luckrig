@@ -17,6 +17,11 @@ logs/
 .env.*
 !.env.example
 
+# Cryptographic keys (keygen writes {prefix}-private.pem / -public.pem into the
+# working tree; node private key = prompt-decryption key, must never be committed)
+*.pem
+*.key
+
 # luckrig local/runtime data (must never be committed)
 .luckrig/
 **/history/*.json

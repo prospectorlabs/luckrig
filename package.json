@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "On-prem LLM inference API sharing platform — tracker prototype.",
+  "license": "Apache-2.0",
   "scripts": {
     "start": "node src/tracker/server.js",
     "dev": "LUCKRIG_DEV=1 node --watch src/tracker/server.js",

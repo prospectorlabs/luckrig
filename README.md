@@ -2,6 +2,9 @@
 
 > 今この瞬間、誰かのオンプレミス環境で動いているLLM推論APIを、貢献ベースで試せる場所
 
+> [!NOTE]
+> これは**コンセプト + 動作するPOC**であり、運用中のホスト型サービスではありません。公開トラッカーやノードは存在せず、「今すぐ参加できる稼働中プラットフォーム」ではありません。設計思想・プロトタイプ実装・設計判断の記録を共有するためのリポジトリです。実際に運用する場合の法的前提は [`LEGALISSUE.md`](./LEGALISSUE.md) を参照（これは法的助言ではありません）。
+
 オンプレミスLLM推論APIシェアリングプラットフォーム。Hotline Connectの「貢献ベースのアクセス権」をローカルLLMの世界に移植し、OpenAI互換APIをコミュニティ間で共助する。
 
 - **luck**（引き当てる）+ **rig**（自分の環境・装備）
@@ -93,4 +96,8 @@ npm test
 
 ## Status
 
-v1/POC実装完了。公開リスト、死活監視、SQLite/JSONL永続化、token、durable limited quota、prompt filter、node proxy、public-key subtext、browser public-key試食、queue可視化、環境フィルタ/比較ビュー、多軸貢献スコア、Showcase自動生成、browser identity永続化、別経路fingerprint任意照合、IP token rate limit、heuristic tokenizer replay、pseudo SSE、replay保存までをNode.js標準ライブラリのみで実装済み。コンセプト v5.3 確定。
+v1/POC実装完了。公開リスト、死活監視、SQLite/JSONL永続化、token、durable limited quota、prompt filter、node proxy、public-key subtext、browser public-key試食、queue可視化、環境フィルタ/比較ビュー、多軸貢献スコア、Showcase自動生成、browser identity永続化、別経路fingerprint任意照合、IP token rate limit、heuristic tokenizer replay、pseudo SSE、replay保存までをNode.js標準ライブラリのみで実装済み。コンセプト v5.6 確定。
+
+## License
+
+[Apache License 2.0](./LICENSE)。明示的な無保証条項（§7 Disclaimer of Warranty）はluckrigの「保証しません、でも試せます」という免責思想と整合します。
