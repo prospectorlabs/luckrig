@@ -103,6 +103,9 @@ CONCEPT.md §「最小実装の順序」に従う。順序を入れ替えない�
 
 ## 9. Git の使い方（サンドボックス回避策）
 
+> 永続メモ: `~/.codex/memories/sandbox-git.md` (汎用テク) と `~/.codex/memories/luckrig.md` (このプロジェクト固有設定) にも記録済み。新セッションのagentはそちらも参照する。
+
+
 Codexサンドボックスが `.git/` `.agents/` `.codex/` をread-only tmpfsでマスクしているため、通常の `git init` はできません。
 このプロジェクトでは **gitdirを `~/.codex/memories/luckrig-git` に分離** しています。
 
