@@ -14,6 +14,8 @@
 
 ユーザーストーリーと受け入れ条件は [`USERSTORY.md`](./USERSTORY.md) を参照。
 
+操作手順は [`MANUAL.md`](./MANUAL.md) を参照。
+
 ## 構成要素
 
 | コンポーネント | 役割 |
