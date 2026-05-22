@@ -1,0 +1,804 @@
+# luckrig — Technical Specification
+
+Status: **POC implemented / production spec draft**  
+Source of truth: [`CONCEPT.md`](./CONCEPT.md)  
+Related docs: [`README.md`](./README.md), [`docs/poc.md`](./docs/poc.md), [`docs/tracker-api.md`](./docs/tracker-api.md), [`docs/metrics-schema.md`](./docs/metrics-schema.md)
+
+---
+
+## 1. Purpose
+
+luckrig is an **on-premises LLM inference API sharing platform**.
+
+It lets users discover and try OpenAI-compatible text-generation APIs currently running on other people's local machines. Access is contribution-based, not SLA-based. The platform is designed as a real-time map of local LLM infrastructure rather than a model leaderboard.
+
+The POC proves this path:
+
+```text
+tracker
+  → public node list
+  → health / telemetry collection
+  → tasting token
+  → node proxy
+  → subtext encrypted prompt
+  → buffered generation
+  → pseudo SSE response
+  → local replay record
+```
+
+---
+
+## 2. Product Scope
+
+### 2.1 In scope for v1
+
+- Text generation only
+- OpenAI-compatible Chat Completions style API
+- Public node listing
+- Liveness monitoring
+- Basic telemetry collection
+- Node registration CLI
+- Node-side proxy layer
+- Contribution-aware tasting token issuance
+- subtext-based prompt / response hiding
+- Buffered generation with pseudo SSE playback
+- Local replay persistence
+
+### 2.2 Out of scope for v1
+
+- Image generation / ComfyUI
+- Voice synthesis / RVC
+- Speech recognition / Whisper
+- Guaranteed SLA
+- Payment / credit marketplace
+- Attestation / canary prompts / output verification
+- Production content-moderation policy beyond explicit project stance
+- Production public-key handoff implementation in the current POC
+
+### 2.3 Non-negotiable product constraints
+
+The following are intentional design decisions from `CONCEPT.md` and must not be silently changed:
+
+1. **No attestation or canary prompt verification**  
+   False listings are addressed structurally, not through hard verification.
+
+2. **Contribution score is status-like, not a tradable asset**  
+   Do not implement transferable credits as the primary model.
+
+3. **Default discovery is rarity / Showcase oriented**  
+   Do not sort default lists by highest GPU performance.
+
+4. **tok/s is not node self-report**  
+   It must come from client-side replay / chunk timestamp evidence.
+
+5. **Replay is local-first**  
+   Prompt and response replay data are saved locally, not uploaded to tracker by default.
+
+6. **Privacy is limited and must be stated honestly**  
+   Use the phrase “頑張らなければ見えない” carefully: tcpdump/logs should not reveal plaintext, but a node operator who instruments the process can still see plaintext.
+
+---
+
+## 3. Architecture
+
+```text
+┌──────────────────┐
+│ Public Web UI     │
+│ /                 │
+└─────────┬────────┘
+          │ GET /api/nodes
+          ▼
+┌──────────────────┐
+│ Tracker           │
+│ - registry        │
+│ - liveness        │
+│ - telemetry JSONL │
+│ - tasting token   │
+└─────────┬────────┘
+          │ health probe / token
+          ▼
+┌──────────────────┐        OpenAI-compatible API
+│ Node Proxy        │ ─────────────────────────────▶ ollama / llama.cpp / mock
+│ - /health         │
+│ - token verify    │
+│ - subtext decode  │
+│ - buffer output   │
+│ - subtext encode  │
+└─────────┬────────┘
+          │ pseudo SSE
+          ▼
+┌──────────────────┐
+│ Client / Replay   │
+│ ~/.luckrig/history│
+└──────────────────┘
+```
+
+### 3.1 Tracker
+
+Implementation: `src/tracker/server.js`
+
+Responsibilities:
+
+- Serve public node list
+- Serve static prototype UI
+- Load node registry
+- Probe node `health_url`
+- Append health / telemetry samples to JSONL
+- Aggregate metrics summaries
+- Issue POC tasting tokens
+- Expose dev-only manual registration / probe endpoints
+
+Tracker must not:
+
+- Store prompts or responses
+- Perform generation requests as part of liveness probing
+- Treat node-reported tok/s as authoritative
+
+### 3.2 Node Proxy
+
+Implementation: `src/proxy/server.js`
+
+Responsibilities:
+
+- Expose `/health`
+- Expose OpenAI-compatible `/v1/chat/completions`
+- Verify tasting token
+- Extract subtext prompt from `messages[].content`
+- Decrypt prompt envelope
+- Forward plaintext prompt to upstream OpenAI-compatible endpoint
+- Buffer upstream response completely
+- Encrypt response envelope
+- Return encrypted response as pseudo SSE or JSON completion
+
+Node Proxy must not:
+
+- Log plaintext prompt / response
+- Pretend plaintext is impossible to observe inside the process
+- Stream raw upstream chunks directly to user in the subtext path
+
+### 3.3 CLI
+
+Implementation: `src/cli/luckrig.js`
+
+Commands:
+
+```bash
+luckrig register ...
+luckrig token ...
+luckrig proxy ...
+```
+
+POC command examples are documented in [`docs/poc.md`](./docs/poc.md).
+
+### 3.4 subtext
+
+Implementation: `src/subtext/index.js`
+
+The POC encodes encrypted bytes into Unicode variation selectors.
+
+- AES-256-GCM provides confidentiality / integrity for the payload envelope.
+- Variation selectors provide invisible embedding inside a cover string.
+- Cover text has no security meaning.
+
+POC caveat:
+
+- Current POC derives AES key from a token-carried `session_secret`.
+- Production should replace this with the public-key handoff described in `CONCEPT.md`.
+
+### 3.5 Replay
+
+Implementation: `src/client/replay.js`
+
+Responsibilities:
+
+- Parse pseudo SSE chunks
+- Extract encrypted subtext content
+- Decrypt response envelope
+- Build replay record
+- Save replay JSON locally
+
+Default local history path:
+
+```text
+~/.luckrig/history/
+```
+
+---
+
+## 4. Runtime Configuration
+
+### 4.1 Tracker environment variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `LUCKRIG_HOST` | `127.0.0.1` | Tracker bind host |
+| `LUCKRIG_PORT` | `8787` | Tracker bind port |
+| `LUCKRIG_REGISTRY_PATH` | `data/nodes.seed.json` | Node registry JSON path |
+| `LUCKRIG_METRICS_PATH` | `data/metrics.jsonl` | Runtime health/telemetry JSONL path |
+| `LUCKRIG_HEALTH_INTERVAL_MS` | `30000` | Health probe interval |
+| `LUCKRIG_HEALTH_TIMEOUT_MS` | `2000` | Health probe timeout per node |
+| `LUCKRIG_DEV` | unset | Enables dev-only write endpoints when `1` |
+| `LUCKRIG_TRACKER_SECRET` | dev default | HMAC secret for POC token signing |
+| `LUCKRIG_FULL_ACCESS_SCORE_THRESHOLD` | `1` | POC threshold for `contributor` tier |
+
+### 4.2 Proxy environment variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `LUCKRIG_PROXY_HOST` | `127.0.0.1` | Proxy bind host |
+| `LUCKRIG_PROXY_PORT` | `8788` | Proxy bind port |
+| `LUCKRIG_NODE_ID` | `local-poc-node` | Node ID expected in tasting token |
+| `LUCKRIG_TRACKER_SECRET` | dev default | HMAC secret shared with tracker in POC |
+| `LUCKRIG_UPSTREAM_URL` | unset | OpenAI-compatible upstream base URL. If unset, proxy uses mock generation |
+
+---
+
+## 5. Data Model
+
+### 5.1 Node registry
+
+Runtime file:
+
+```text
+data/nodes.seed.json
+```
+
+Shape: array of node records.
+
+Required fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `endpoint_url` | string | OpenAI-compatible API base URL |
+| `model_name` | string | Model name shown in public list |
+| `quantization` | string | Quantization label |
+| `gpu` | string | GPU / accelerator / CPU description |
+
+Optional fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | Stable node ID. Auto-derived if omitted |
+| `display_name` | string | Public display name |
+| `health_url` | string | Health endpoint. Defaults to `${endpoint_url without /v1}/health` |
+| `lora` | string | LoRA information |
+| `vram_gb` | number/null | VRAM amount |
+| `context_length` | number/null | Context window |
+| `availability_note` | string | Human-readable uptime note |
+| `tuning_note` | string | Freeform tuning note |
+| `tags` | string[] | Tags such as `showcase`, `cpu`, `apple-silicon` |
+
+### 5.2 Health state
+
+Attached to public node response at runtime:
+
+```json
+{
+  "status": "available",
+  "last_checked_at": "2026-05-22T07:00:00.000Z",
+  "last_seen_at": "2026-05-22T07:00:00.000Z",
+  "latency_ms": 18,
+  "consecutive_failures": 0,
+  "last_error": null
+}
+```
+
+Allowed statuses:
+
+- `unknown`
+- `available`
+- `unavailable`
+
+### 5.3 Metrics JSONL
+
+Runtime file:
+
+```text
+data/metrics.jsonl
+```
+
+This file is append-only runtime data and must not be committed.
+
+One line per health probe:
+
+```json
+{
+  "schema_version": 1,
+  "type": "health_probe",
+  "observed_at": "2026-05-22T07:00:00.000Z",
+  "node_id": "first-5090-qwen3",
+  "status": "available",
+  "latency_ms": 18,
+  "health_url": "http://127.0.0.1:8788/health",
+  "telemetry": {
+    "memory": { "used_mb": 21000, "total_mb": 32768 },
+    "gpu": { "utilization_pct": 12 },
+    "engine": { "name": "luckrig-proxy" },
+    "queue": { "depth": 0, "active": 0 },
+    "error_rate": 0,
+    "active_requests": 0
+  },
+  "error": null
+}
+```
+
+Detailed schema: [`docs/metrics-schema.md`](./docs/metrics-schema.md)
+
+### 5.4 Replay record
+
+Local-only file:
+
+```text
+~/.luckrig/history/YYYY-MM-DD_HHMMSS_{node_id}.json
+```
+
+Shape:
+
+```json
+{
+  "schema_version": 1,
+  "created_at": "2026-05-22T07:00:00.000Z",
+  "prompt": "hello",
+  "response": "mock:hello",
+  "node_id": "first-5090-qwen3",
+  "queue_wait_sec": 0,
+  "generation_sec": 0.012,
+  "tok_per_sec": 250,
+  "ttft_ms": 0,
+  "chunk_timestamps": [1779430000000]
+}
+```
+
+Rules:
+
+- Replay must include `schema_version`.
+- Replay is local-first and must not be uploaded to tracker by default.
+- POC token estimation uses an approximate character-based token count. Production must use model/tokenizer-aware counting if `tok_per_sec` is used for benchmarking.
+
+---
+
+## 6. HTTP API
+
+### 6.1 Public UI
+
+```http
+GET /
+```
+
+Serves static prototype node-list UI.
+
+### 6.2 Tracker health
+
+```http
+GET /api/health
+```
+
+Response includes tracker service status, registry path, metrics path, node count, and health probe configuration.
+
+### 6.3 List nodes
+
+```http
+GET /api/nodes?status=all|available|unavailable|unknown
+```
+
+Response:
+
+```json
+{
+  "schema_version": 1,
+  "sort": "rarity_score_desc_then_vram_asc",
+  "nodes": []
+}
+```
+
+Sorting rule:
+
+1. `rarity_score` descending
+2. `vram_gb` ascending
+3. `created_at` ascending
+
+This intentionally prevents the default list from becoming a high-end GPU leaderboard.
+
+### 6.4 Get node
+
+```http
+GET /api/nodes/:id
+```
+
+Returns one public node record.
+
+### 6.5 Metrics summary
+
+```http
+GET /api/metrics
+GET /api/metrics/:id
+```
+
+Returns aggregated health probe summaries from JSONL.
+
+### 6.6 Issue tasting token
+
+```http
+POST /api/tokens
+Content-Type: application/json
+
+{
+  "node_id": "first-5090-qwen3",
+  "user_id": "alice",
+  "contribution_score": 1,
+  "ttl_sec": 900
+}
+```
+
+POC response:
+
+```json
+{
+  "schema_version": 1,
+  "token_type": "Bearer",
+  "token": "...",
+  "expires_at": "2026-05-22T07:15:00.000Z",
+  "session_secret": "...",
+  "contribution": {
+    "user_id": "alice",
+    "contribution_score": 1,
+    "tier": "contributor"
+  },
+  "node": {},
+  "caveat": "POC token carries a session secret for local E2E testing. Production should replace this with the CONCEPT public-key handoff."
+}
+```
+
+POC caveat:
+
+- `session_secret` in response/token is acceptable only for local POC.
+- Production must replace this with asymmetric key handoff.
+
+### 6.7 Contribution status
+
+```http
+GET /api/contribution/:user_id?score=1
+```
+
+POC tier rule:
+
+```text
+score >= LUCKRIG_FULL_ACCESS_SCORE_THRESHOLD → contributor
+otherwise                                      → limited
+```
+
+### 6.8 Dev-only node registration
+
+Enabled only when `LUCKRIG_DEV=1`:
+
+```http
+POST /api/nodes
+```
+
+Used by POC CLI before production registration flow exists.
+
+### 6.9 Dev-only manual probe
+
+Enabled only when `LUCKRIG_DEV=1`:
+
+```http
+POST /api/probe
+```
+
+Runs health probes immediately.
+
+### 6.10 Proxy health
+
+```http
+GET /health
+```
+
+Returns node proxy health and optional telemetry.
+
+### 6.11 Proxy chat completions
+
+```http
+POST /v1/chat/completions
+Authorization: Bearer {tasting_token}
+Content-Type: application/json
+
+{
+  "model": "luckrig-poc",
+  "stream": true,
+  "messages": [
+    { "role": "user", "content": "cover text + invisible subtext" }
+  ]
+}
+```
+
+Behavior:
+
+1. Verify Bearer token.
+2. Verify token `node_id` matches proxy node ID.
+3. Extract invisible subtext payload.
+4. Decrypt prompt envelope.
+5. Forward prompt to upstream or mock generator.
+6. Buffer complete response.
+7. Encrypt response envelope.
+8. Return pseudo SSE chunks when `stream: true`.
+
+---
+
+## 7. Security and Privacy Model
+
+### 7.1 Intended protection
+
+subtext + AES-GCM is intended to prevent plaintext prompt / response from appearing in ordinary network capture or naive logs.
+
+### 7.2 Explicit limits
+
+Node operators can still see plaintext if they instrument:
+
+- the proxy process
+- the upstream inference process
+- memory
+- debugger hooks
+- modified llama.cpp / ollama input path
+
+Therefore, luckrig must not claim production-grade end-to-end privacy against a malicious node operator.
+
+### 7.3 Tracker trust model
+
+Production target from `CONCEPT.md`:
+
+- Tracker alone cannot read plaintext.
+- Node alone cannot decrypt response intended for user private key.
+- Tracker + node can collude by swapping public keys.
+- This trust model must be documented clearly in UI and docs.
+
+POC simplification:
+
+- Tracker/proxy share HMAC secret.
+- Token carries session secret for local E2E testing.
+- This is not the final privacy model.
+
+### 7.4 Token requirements
+
+POC token:
+
+- HMAC-SHA256 signed
+- Includes `node_id`, `user_id`, `tier`, `iat`, `exp`, `jti`, `session_secret`
+- Must reject invalid signature
+- Must reject expired token
+- Must reject node mismatch
+
+Production token:
+
+- Must remove symmetric session secret exposure from tracker response/token design.
+- Must integrate with public-key handoff.
+
+---
+
+## 8. Contribution and Access Model
+
+### 8.1 Access tiers
+
+Conceptual model:
+
+1. Anonymous users can view public list.
+2. Registered but non-contributing users get limited tasting access.
+3. Contributors get broad/full access.
+
+POC implementation:
+
+- Anonymous list viewing is implemented.
+- Token issuance accepts `contribution_score` input.
+- `score >= threshold` gives `contributor` tier.
+- Real scoring and quota enforcement are not yet implemented.
+
+### 8.2 Contribution score principles
+
+Production contribution score should include:
+
+- Existence score
+- Rarity score
+- Usage score
+- Discovery score
+- Tuning-note score
+
+Permanent access rights and Showcase ranking must remain separate systems.
+
+---
+
+## 9. Benchmarking and Observability
+
+### 9.1 Implemented now
+
+- Health status
+- Probe latency
+- Consecutive failures
+- Availability ratio
+- Optional memory / GPU / engine / queue telemetry
+- JSONL append-only metrics
+
+### 9.2 Not authoritative yet
+
+- `tok_per_sec` in POC replay uses approximate token estimation.
+- `ttft_ms` is carried in replay schema but not measured from a real upstream timing source in POC.
+
+### 9.3 Production rule
+
+Benchmark fields must be derived from client/proxy timestamp evidence, not from node self-report.
+
+---
+
+## 10. POC Test Specification
+
+### 10.1 Commands
+
+```bash
+npm run check
+npm run test:smoke
+npm run test:e2e
+npm test
+```
+
+### 10.2 `npm run check`
+
+Must syntax-check:
+
+- tracker
+- proxy
+- CLI
+- subtext
+- replay
+- tasting client helper
+
+### 10.3 `npm run test:smoke`
+
+Must verify:
+
+- registry can load
+- health probes run without crashing
+- public node list contains seed nodes
+- metrics summary is produced
+- static UI marker exists
+
+### 10.4 `npm run test:e2e`
+
+Must verify:
+
+- tracker registry and metrics initialization
+- `POST /api/tokens`
+- contribution tier calculation
+- CLI register request construction
+- tasting token signature verification
+- subtext prompt encryption/decryption
+- proxy token validation
+- prompt decryption
+- mock upstream generation
+- encrypted response envelope
+- pseudo SSE output
+- replay creation
+- replay save/load
+- invalid token rejection
+
+### 10.5 Current known sandbox constraint
+
+In the Codex sandbox, binding local ports may fail with `EPERM`. Tests therefore call tracker/proxy handlers directly instead of relying on listening sockets.
+
+---
+
+## 11. Local Development
+
+### 11.1 Install / run
+
+No external dependencies are required for the current POC.
+
+```bash
+npm test
+```
+
+### 11.2 Start tracker
+
+```bash
+LUCKRIG_DEV=1 \
+LUCKRIG_TRACKER_SECRET=dev-secret \
+npm start
+```
+
+### 11.3 Start proxy
+
+```bash
+LUCKRIG_NODE_ID=first-5090-qwen3 \
+LUCKRIG_TRACKER_SECRET=dev-secret \
+node src/proxy/server.js
+```
+
+Mock mode is used when `LUCKRIG_UPSTREAM_URL` is unset.
+
+Forwarding mode:
+
+```bash
+LUCKRIG_UPSTREAM_URL=http://127.0.0.1:8088/v1 node src/proxy/server.js
+```
+
+### 11.4 CLI examples
+
+```bash
+node src/cli/luckrig.js register \
+  --tracker http://127.0.0.1:8787 \
+  --endpoint-url http://127.0.0.1:8788/v1 \
+  --health-url http://127.0.0.1:8788/health \
+  --model-name Qwen3-35B-A3B \
+  --quantization Q4_K_XL \
+  --gpu RTX_5090 \
+  --vram-gb 32
+```
+
+```bash
+node src/cli/luckrig.js token \
+  --tracker http://127.0.0.1:8787 \
+  --node-id first-5090-qwen3 \
+  --user-id alice \
+  --contribution-score 1
+```
+
+---
+
+## 12. Repository Layout
+
+```text
+CONCEPT.md                 Product concept / source of truth
+SPEC.md                    This technical specification
+README.md                  Human-facing overview
+AGENTS.md                  Agent guardrails
+
+data/nodes.seed.json       Seed node registry
+
+docs/poc.md                POC guide
+docs/tracker-api.md        Tracker API details
+docs/metrics-schema.md     Metrics JSONL schema
+
+public/                    Prototype public list UI
+scripts/smoke-test.js      Smoke test
+scripts/e2e-test.js        End-to-end POC test
+
+src/tracker/               Tracker server
+src/proxy/                 Node proxy
+src/cli/                   CLI
+src/subtext/               subtext + AES-GCM helpers
+src/client/                Tasting/replay client helpers
+src/shared/                shared token/base64url helpers
+```
+
+---
+
+## 13. Productionization Backlog
+
+Before production, at minimum:
+
+1. Replace POC `session_secret` token flow with public-key handoff.
+2. Introduce durable DB for registry, tokens, metrics summaries, contribution state.
+3. Implement real quota enforcement for limited users.
+4. Implement production node registration flow.
+5. Add actual upstream integration tests against llama.cpp / ollama compatible endpoints.
+6. Add tokenizer-aware replay benchmark calculations.
+7. Add content filtering policy and enforcement.
+8. Add UI flow for tasting: token request → queue UX → pseudo SSE playback → replay save.
+9. Add operational docs for node providers.
+10. Add migration/versioning story for metrics and replay schemas.
+
+---
+
+## 14. Acceptance Criteria for Current POC
+
+The current POC is considered valid when all of the following hold:
+
+- `npm test` passes.
+- Public seed nodes load from registry.
+- Health probes append metrics samples without committing runtime JSONL.
+- Tracker can issue a POC tasting token for a node.
+- Proxy can validate the token and node binding.
+- Prompt can be encrypted into subtext and decrypted by proxy.
+- Proxy can generate or forward a response after buffering.
+- Response can be encrypted into subtext and returned through pseudo SSE.
+- Client can parse pseudo SSE and create a local replay record.
+- Replay record can be saved and loaded.
+- Invalid token is rejected.
+- Docs clearly state that POC token/session-secret flow is not the final privacy design.
