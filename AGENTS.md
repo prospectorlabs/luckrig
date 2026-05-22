@@ -50,15 +50,25 @@ luckrig/
 ├── CONCEPT.md          # 正典
 ├── README.md           # 人間向け概要
 ├── AGENTS.md           # このファイル
-└── (未実装)
-    ├── tracker/        # 中央トラッカー (ノード登録/死活監視/トークン発行)
-    ├── proxy/          # ノード側プロキシ層 (subtext + バッファ + 擬似SSE)
-    ├── cli/            # ノード登録CLI
-    ├── web/            # 試食UI
-    └── subtext/        # subtextライブラリ (Unicode variation selector実装)
+├── SPEC.md             # 技術仕様 (v1/POCの実装範囲・API・データモデル)
+├── USERSTORY.md        # ユーザーストーリーと受け入れ条件
+├── MANUAL.md           # 操作マニュアル
+├── BACKLOG.md          # POC v1以降の積み残し (実地検証 / v6機能 / 運用ハードニング)
+├── LEGALISSUE.md       # 法務論点 (公開前に弁護士と相談すべき項目。法的助言ではない)
+├── docs/               # 補助ドキュメント (tracker-api / metrics-schema / poc)
+├── src/
+│   ├── tracker/        # 中央トラッカー (ノード登録/死活監視/トークン発行/ban/abuse)
+│   ├── proxy/          # ノード側プロキシ層 (plain真SSE + subtext + moderation hook)
+│   ├── cli/            # ノード登録CLI
+│   ├── client/         # 試食/replayクライアントヘルパ
+│   ├── shared/         # token / filter / moderation / fingerprint / tokenizer
+│   └── subtext/        # subtextライブラリ (Unicode variation selector実装)
+├── public/             # 試食UI (公開リスト + browser POC)
+├── scripts/            # smoke / e2e tests
+└── data/               # runtime data (gitignore)
 ```
 
-技術スタックは未確定。最初の実装タスクの前にユーザーと合意すること。
+技術スタック: Node.js 22+ 標準ライブラリのみ（依存パッケージなし）、SQLite永続化はオプション（既定有効）。WebCryptoはブラウザPOC側で使用。
 
 ## 5. 実装の順序
 
@@ -71,6 +81,8 @@ CONCEPT.md §「最小実装の順序」に従う。順序を入れ替えない�
 5. 試食UI (キューUX + 擬似SSE)
 6. リプレイ機能
 7. 貢献スコア + 権限管理
+
+**POC v1 はすべて実装済み**（CONCEPT v5.6 / 3段構えモデレーション / Notice-and-Takedown / 真SSE plain mode / opt-in timing upload まで）。これ以降の積み残しは [`BACKLOG.md`](./BACKLOG.md) を参照。
 
 ## 6. 用語のゆれを統一する
 
