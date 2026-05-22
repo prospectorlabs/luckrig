@@ -37,6 +37,7 @@
  * @property {string} display_name
  * @property {string} endpoint_url
  * @property {string} health_url
+ * @property {string} node_public_key
  * @property {string} model_name
  * @property {string} quantization
  * @property {string} lora

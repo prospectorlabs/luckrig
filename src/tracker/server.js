@@ -4,6 +4,7 @@ import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { publicKeyFingerprint } from '../shared/keyhandshake.js';
 import { issueTastingToken } from '../shared/token.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -330,6 +331,7 @@ function normalizeNode(input, existing = undefined) {
     display_name: asOptionalString(input.display_name ?? input.displayName, `${gpu} / ${modelName}`),
     endpoint_url: endpointUrl,
     health_url: healthUrl,
+    node_public_key: asOptionalString(input.node_public_key ?? input.nodePublicKey),
     model_name: modelName,
     quantization,
     lora: asOptionalString(input.lora, 'なし'),
@@ -371,11 +373,22 @@ function computeRarityScores() {
   return scores;
 }
 
+function nodePublicKeyFingerprint(node) {
+  if (!node?.node_public_key) return null;
+  try {
+    return publicKeyFingerprint(node.node_public_key);
+  } catch {
+    return null;
+  }
+}
+
 function publicNode(node, rarityScore) {
   return {
     id: node.id,
     display_name: node.display_name,
     endpoint_url: node.endpoint_url,
+    node_public_key: node.node_public_key || null,
+    node_public_key_fingerprint: nodePublicKeyFingerprint(node),
     model_name: node.model_name,
     quantization: node.quantization,
     lora: node.lora,
@@ -586,22 +599,33 @@ async function handleApi(req, res, url) {
       userId: asOptionalString(body.user_id ?? body.userId, 'anonymous'),
       contributionScore: body.contribution_score ?? body.contributionScore ?? 0,
     });
+    const node = nodes.get(nodeId);
+    const userPublicKey = asOptionalString(body.user_public_key ?? body.userPublicKey);
+    const nodePublicKey = node?.node_public_key || asOptionalString(body.node_public_key ?? body.nodePublicKey);
     const issued = issueTastingToken({
       secret: TRACKER_SECRET,
       nodeId,
       userId: status.user_id,
       tier: status.tier,
       ttlSec: asOptionalInteger(body.ttl_sec ?? body.ttlSec, 15 * 60),
+      userPublicKey: userPublicKey || null,
+      nodePublicKey: nodePublicKey || null,
     });
     json(res, 201, {
       schema_version: 1,
       token_type: 'Bearer',
       token: issued.token,
       expires_at: issued.expires_at,
-      session_secret: issued.payload.session_secret,
+      crypto_mode: issued.payload.crypto_mode,
+      session_secret: issued.payload.session_secret ?? null,
+      node_public_key: issued.payload.node_public_key ?? nodePublicKey ?? null,
+      node_public_key_fingerprint: issued.payload.node_public_key_fingerprint ?? (nodePublicKey ? publicKeyFingerprint(nodePublicKey) : null),
+      user_public_key_fingerprint: issued.payload.user_public_key_fingerprint ?? null,
       contribution: status,
       node: publicNode(nodes.get(nodeId), computeRarityScores().get(nodeId) ?? 0),
-      caveat: 'POC token carries a session secret for local E2E testing. Production should replace this with the CONCEPT public-key handoff.',
+      caveat: issued.payload.crypto_mode === 'public-key'
+        ? 'Public-key POC mode: prompt is encrypted for node key and response is encrypted for user key. Tracker still signs and transports public keys.'
+        : 'Legacy POC token carries a session secret for local E2E testing. Prefer user_public_key + node_public_key public-key mode.',
     }, corsHeaders());
     return;
   }

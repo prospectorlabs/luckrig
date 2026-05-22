@@ -116,11 +116,13 @@ POC用の試食token発行。body:
   "node_id": "first-5090-qwen3",
   "user_id": "alice",
   "contribution_score": 1,
-  "ttl_sec": 900
+  "ttl_sec": 900,
+  "user_public_key": "-----BEGIN PUBLIC KEY-----...",
+  "node_public_key": "-----BEGIN PUBLIC KEY-----..."
 }
 ```
 
-レスポンスはBearer token、期限、POC用session secret、contribution tierを含みます。productionではCONCEPT.mdの公開鍵ハンドオフへ差し替える前提です。
+レスポンスはBearer token、期限、`crypto_mode`、node public key、public key fingerprint、contribution tierを含みます。`user_public_key` を指定した場合はpublic-key modeになり、session secretは返りません。legacyとしてsession-secret modeも残っています。productionでは公開鍵フィンガープリント検証を追加する前提です。
 
 ### `GET /api/contribution/:user_id?score=1`
 

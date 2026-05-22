@@ -12,8 +12,15 @@ const tracker = await import('../src/tracker/server.js');
 const { processChatCompletion } = await import('../src/proxy/server.js');
 const { buildEncryptedChatBody, replayFromProxyResult } = await import('../src/client/tasting.js');
 const { loadReplayRecord, saveReplayRecord } = await import('../src/client/replay.js');
-const { decryptJsonFromSubtext, encryptJsonToSubtext, hasSubtext } = await import('../src/subtext/index.js');
+const {
+  decryptJsonFromSubtext,
+  decryptJsonFromSubtextWithPrivateKey,
+  encryptJsonToSubtext,
+  encryptJsonToSubtextForPublicKey,
+  hasSubtext,
+} = await import('../src/subtext/index.js');
 const { verifyTastingToken } = await import('../src/shared/token.js');
+const { generateBoxKeyPair, publicKeyFingerprint } = await import('../src/shared/keyhandshake.js');
 const { buildRegisterRequest } = await import('../src/cli/luckrig.js');
 
 function makeReq({ method = 'GET', url = '/', body = null, headers = {} } = {}) {
@@ -79,46 +86,67 @@ async function main() {
   const node = nodesResponse.json.nodes[0];
   assert.ok(node.observations.samples_count >= 1);
 
+  const nodeKeys = generateBoxKeyPair();
+  const userKeys = generateBoxKeyPair();
+
   const tokenResponse = await requestTracker({
     method: 'POST',
     url: '/api/tokens',
     headers: { 'content-type': 'application/json' },
-    body: { node_id: node.id, user_id: 'contributor-e2e', contribution_score: 1, ttl_sec: 60 },
+    body: {
+      node_id: node.id,
+      user_id: 'contributor-e2e',
+      contribution_score: 1,
+      ttl_sec: 60,
+      user_public_key: userKeys.publicKeyPem,
+      node_public_key: nodeKeys.publicKeyPem,
+    },
   });
   assert.equal(tokenResponse.statusCode, 201, tokenResponse.text);
   assert.equal(tokenResponse.json.schema_version, 1);
   assert.equal(tokenResponse.json.contribution.tier, 'contributor');
+  assert.equal(tokenResponse.json.crypto_mode, 'public-key');
+  assert.equal(tokenResponse.json.session_secret, null);
+  assert.equal(tokenResponse.json.node_public_key.trim(), nodeKeys.publicKeyPem.trim());
+  assert.equal(tokenResponse.json.node_public_key_fingerprint, publicKeyFingerprint(nodeKeys.publicKeyPem));
+  assert.equal(tokenResponse.json.user_public_key_fingerprint, publicKeyFingerprint(userKeys.publicKeyPem));
 
   const tokenPayload = verifyTastingToken(tokenResponse.json.token, {
     secret: process.env.LUCKRIG_TRACKER_SECRET,
     expectedNodeId: node.id,
   });
   assert.equal(tokenPayload.user_id, 'contributor-e2e');
+  assert.equal(tokenPayload.crypto_mode, 'public-key');
+  assert.equal(tokenPayload.user_public_key.trim(), userKeys.publicKeyPem.trim());
+  assert.equal(tokenPayload.user_public_key_fingerprint, publicKeyFingerprint(userKeys.publicKeyPem));
 
   const cliDryRun = buildRegisterRequest({
     endpointUrl: 'http://127.0.0.1:8788/v1',
     modelName: 'e2e-model',
     quantization: 'Q4_K_M',
     gpu: 'E2E_GPU',
+    nodePublicKey: nodeKeys.publicKeyPem,
   });
   assert.equal(cliDryRun.method, 'POST');
   assert.equal(cliDryRun.body.model_name, 'e2e-model');
+  assert.equal(cliDryRun.body.node_public_key, nodeKeys.publicKeyPem);
 
   const prompt = 'hello from luckrig e2e';
-  const body = buildEncryptedChatBody({ prompt, sessionSecret: tokenResponse.json.session_secret, stream: true });
+  const body = buildEncryptedChatBody({ prompt, nodePublicKey: tokenResponse.json.node_public_key, stream: true });
   assert.equal(hasSubtext(body.messages[0].content), true);
-  assert.equal(decryptJsonFromSubtext(body.messages[0].content, { sessionSecret: tokenResponse.json.session_secret }).prompt, prompt);
+  assert.equal(decryptJsonFromSubtextWithPrivateKey(body.messages[0].content, { privateKey: nodeKeys.privateKeyPem }).prompt, prompt);
 
   const proxyResult = await processChatCompletion({
     body,
     authHeader: `Bearer ${tokenResponse.json.token}`,
     nodeId: node.id,
     trackerSecret: process.env.LUCKRIG_TRACKER_SECRET,
+    nodePrivateKey: nodeKeys.privateKeyPem,
   });
   assert.equal(proxyResult.kind, 'sse');
   assert.ok(proxyResult.chunks.join('').includes('[DONE]'));
 
-  const replay = replayFromProxyResult(proxyResult, { sessionSecret: tokenResponse.json.session_secret, ttft_ms: 0 });
+  const replay = replayFromProxyResult(proxyResult, { userPrivateKey: userKeys.privateKeyPem, ttft_ms: 0 });
   assert.equal(replay.schema_version, 1);
   assert.equal(replay.prompt, prompt);
   assert.equal(replay.response, `mock:${prompt}`);
@@ -130,11 +158,14 @@ async function main() {
   const loadedReplay = await loadReplayRecord(replayPath);
   assert.deepEqual(loadedReplay, replay);
 
-  const encrypted = encryptJsonToSubtext({ ok: true }, { sessionSecret: tokenResponse.json.session_secret });
-  assert.deepEqual(decryptJsonFromSubtext(encrypted, { sessionSecret: tokenResponse.json.session_secret }), { ok: true });
+  const encrypted = encryptJsonToSubtextForPublicKey({ ok: true }, { publicKey: userKeys.publicKeyPem });
+  assert.deepEqual(decryptJsonFromSubtextWithPrivateKey(encrypted, { privateKey: userKeys.privateKeyPem }), { ok: true });
+
+  const legacyEncrypted = encryptJsonToSubtext({ ok: true }, { sessionSecret: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' });
+  assert.deepEqual(decryptJsonFromSubtext(legacyEncrypted, { sessionSecret: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }), { ok: true });
 
   await assert.rejects(
-    () => processChatCompletion({ body, authHeader: 'Bearer broken', nodeId: node.id, trackerSecret: process.env.LUCKRIG_TRACKER_SECRET }),
+    () => processChatCompletion({ body, authHeader: 'Bearer broken', nodeId: node.id, trackerSecret: process.env.LUCKRIG_TRACKER_SECRET, nodePrivateKey: nodeKeys.privateKeyPem }),
     /invalid token format|invalid token signature/,
   );
 

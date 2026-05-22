@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { base64urlDecode, base64urlEncode } from '../shared/base64url.js';
+import { decryptJsonWithPrivateKey, encryptJsonForPublicKey } from '../shared/keyhandshake.js';
 
 // POC variant of subtext: encode encrypted bytes as invisible Unicode variation selectors.
 // Two variation selectors represent one byte (high/low nibble). This preserves a plain cover text.
@@ -69,4 +70,16 @@ export function decryptJsonFromSubtext(text, { sessionSecret } = {}) {
     decipher.final(),
   ]);
   return JSON.parse(plaintext.toString('utf8'));
+}
+
+export function encryptJsonToSubtextForPublicKey(value, { publicKey, coverText = DEFAULT_COVER } = {}) {
+  const envelope = encryptJsonForPublicKey(value, { publicKey });
+  return bytesToSubtext(Buffer.from(JSON.stringify(envelope), 'utf8'), coverText);
+}
+
+export function decryptJsonFromSubtextWithPrivateKey(text, { privateKey } = {}) {
+  const envelopeBytes = subtextToBytes(text);
+  if (envelopeBytes.length === 0) throw new Error('subtext payload not found');
+  const envelope = JSON.parse(envelopeBytes.toString('utf8'));
+  return decryptJsonWithPrivateKey(envelope, { privateKey });
 }

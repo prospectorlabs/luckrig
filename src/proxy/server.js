@@ -3,13 +3,20 @@ import { createServer as createMockUpstreamServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { bearerToken, verifyTastingToken } from '../shared/token.js';
-import { decryptJsonFromSubtext, encryptJsonToSubtext, hasSubtext } from '../subtext/index.js';
+import {
+  decryptJsonFromSubtext,
+  decryptJsonFromSubtextWithPrivateKey,
+  encryptJsonToSubtext,
+  encryptJsonToSubtextForPublicKey,
+  hasSubtext,
+} from '../subtext/index.js';
 
 const HOST = process.env.LUCKRIG_PROXY_HOST ?? '127.0.0.1';
 const PORT = Number.parseInt(process.env.LUCKRIG_PROXY_PORT ?? '8788', 10);
 const NODE_ID = process.env.LUCKRIG_NODE_ID ?? 'local-poc-node';
 const TRACKER_SECRET = process.env.LUCKRIG_TRACKER_SECRET ?? 'luckrig-dev-secret-change-me';
 const UPSTREAM_URL = process.env.LUCKRIG_UPSTREAM_URL ?? '';
+const NODE_PRIVATE_KEY = process.env.LUCKRIG_NODE_PRIVATE_KEY ?? '';
 
 function json(res, statusCode, body) {
   res.writeHead(statusCode, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
@@ -94,13 +101,17 @@ export async function processChatCompletion({
   upstreamUrl = UPSTREAM_URL,
   fetchImpl = fetch,
   nowMs = Date.now(),
+  nodePrivateKey = NODE_PRIVATE_KEY,
 } = {}) {
   const token = bearerToken(authHeader);
   if (!token) throw Object.assign(new Error('missing bearer token'), { statusCode: 401 });
   const tokenPayload = verifyTastingToken(token, { secret: trackerSecret, expectedNodeId: nodeId, nowMs });
 
   const encryptedPromptText = extractSubtextMessage(body);
-  const prompt = decryptJsonFromSubtext(encryptedPromptText, { sessionSecret: tokenPayload.session_secret });
+  const cryptoMode = tokenPayload.crypto_mode ?? 'session-secret';
+  const prompt = cryptoMode === 'public-key'
+    ? decryptJsonFromSubtextWithPrivateKey(encryptedPromptText, { privateKey: nodePrivateKey })
+    : decryptJsonFromSubtext(encryptedPromptText, { sessionSecret: tokenPayload.session_secret });
 
   const queuedAt = performance.now();
   // POC queue UX: buffer upstream response fully, then emit pseudo SSE in one pass.
@@ -118,10 +129,15 @@ export async function processChatCompletion({
     generation_sec: Number(generationSec.toFixed(3)),
     upstream: upstream.upstream,
   };
-  const encryptedResponseText = encryptJsonToSubtext(responseEnvelope, {
-    sessionSecret: tokenPayload.session_secret,
-    coverText: 'luckrig response payload',
-  });
+  const encryptedResponseText = cryptoMode === 'public-key'
+    ? encryptJsonToSubtextForPublicKey(responseEnvelope, {
+      publicKey: tokenPayload.user_public_key,
+      coverText: 'luckrig response payload',
+    })
+    : encryptJsonToSubtext(responseEnvelope, {
+      sessionSecret: tokenPayload.session_secret,
+      coverText: 'luckrig response payload',
+    });
 
   if (body?.stream) {
     return {
@@ -158,6 +174,7 @@ export async function handleProxyRequest(req, res, options = {}) {
         ok: true,
         node_id: options.nodeId ?? NODE_ID,
         engine: { name: 'luckrig-proxy', version: '0.0.0', backend: options.upstreamUrl || UPSTREAM_URL ? 'openai-compatible' : 'mock' },
+        crypto_modes: ['public-key', 'session-secret'],
         queue: { depth: 0, active: 0 },
         error_rate: 0,
       });

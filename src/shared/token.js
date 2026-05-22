@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { publicKeyFingerprint } from './keyhandshake.js';
 import { base64urlDecode, base64urlEncode } from './base64url.js';
 
 const DEFAULT_TTL_SEC = 15 * 60;
@@ -25,9 +26,15 @@ export function issueTastingToken({
   ttlSec = DEFAULT_TTL_SEC,
   nowMs = Date.now(),
   sessionSecret = createSessionSecret(),
+  userPublicKey = null,
+  nodePublicKey = null,
+  cryptoMode = userPublicKey ? 'public-key' : 'session-secret',
 }) {
   if (!secret) throw new Error('secret is required');
   if (!nodeId) throw new Error('nodeId is required');
+  const userPublicKeyFingerprint = userPublicKey ? publicKeyFingerprint(userPublicKey) : null;
+  const nodePublicKeyFingerprint = nodePublicKey ? publicKeyFingerprint(nodePublicKey) : null;
+
   const payload = {
     v: 1,
     typ: 'luckrig.tasting',
@@ -35,7 +42,9 @@ export function issueTastingToken({
     node_id: nodeId,
     user_id: userId,
     tier,
-    session_secret: sessionSecret,
+    crypto_mode: cryptoMode,
+    ...(cryptoMode === 'public-key' ? { user_public_key: userPublicKey, user_public_key_fingerprint: userPublicKeyFingerprint } : { session_secret: sessionSecret }),
+    ...(nodePublicKey ? { node_public_key: nodePublicKey, node_public_key_fingerprint: nodePublicKeyFingerprint } : {}),
     iat: Math.floor(nowMs / 1000),
     exp: Math.floor(nowMs / 1000) + ttlSec,
   };

@@ -53,7 +53,7 @@ tracker
 - Payment / credit marketplace
 - Attestation / canary prompts / output verification
 - Production content-moderation policy beyond explicit project stance
-- Production public-key handoff implementation in the current POC
+- Production public-key fingerprint verification / key-substitution mitigation in the current POC
 
 ### 2.3 Non-negotiable product constraints
 
@@ -166,6 +166,7 @@ Commands:
 luckrig register ...
 luckrig token ...
 luckrig proxy ...
+luckrig keygen ...
 ```
 
 POC command examples are documented in [`docs/poc.md`](./docs/poc.md).
@@ -182,8 +183,8 @@ The POC encodes encrypted bytes into Unicode variation selectors.
 
 POC caveat:
 
-- Current POC derives AES key from a token-carried `session_secret`.
-- Production should replace this with the public-key handoff described in `CONCEPT.md`.
+- Current POC supports public-key envelopes using X25519 + HKDF-SHA256 + AES-256-GCM and exposes `sha256:` SPKI fingerprints for public keys.
+- Legacy session-secret mode remains only for compatibility tests and should not be used as the preferred path.
 
 ### 3.5 Replay
 
@@ -230,6 +231,7 @@ Default local history path:
 | `LUCKRIG_NODE_ID` | `local-poc-node` | Node ID expected in tasting token |
 | `LUCKRIG_TRACKER_SECRET` | dev default | HMAC secret shared with tracker in POC |
 | `LUCKRIG_UPSTREAM_URL` | unset | OpenAI-compatible upstream base URL. If unset, proxy uses mock generation |
+| `LUCKRIG_NODE_PRIVATE_KEY` | unset | PEM X25519 private key used to decrypt public-key subtext prompts |
 
 ---
 
@@ -261,6 +263,7 @@ Optional fields:
 | `id` | string | Stable node ID. Auto-derived if omitted |
 | `display_name` | string | Public display name |
 | `health_url` | string | Health endpoint. Defaults to `${endpoint_url without /v1}/health` |
+| `node_public_key` | string | PEM X25519 public key for prompt encryption |
 | `lora` | string | LoRA information |
 | `vram_gb` | number/null | VRAM amount |
 | `context_length` | number/null | Context window |
@@ -426,7 +429,9 @@ Content-Type: application/json
   "node_id": "first-5090-qwen3",
   "user_id": "alice",
   "contribution_score": 1,
-  "ttl_sec": 900
+  "ttl_sec": 900,
+  "user_public_key": "-----BEGIN PUBLIC KEY-----...",
+  "node_public_key": "-----BEGIN PUBLIC KEY-----..."
 }
 ```
 
@@ -438,21 +443,26 @@ POC response:
   "token_type": "Bearer",
   "token": "...",
   "expires_at": "2026-05-22T07:15:00.000Z",
-  "session_secret": "...",
+  "crypto_mode": "public-key",
+  "session_secret": null,
+  "node_public_key": "-----BEGIN PUBLIC KEY-----...",
+  "node_public_key_fingerprint": "sha256:...",
+  "user_public_key_fingerprint": "sha256:...",
   "contribution": {
     "user_id": "alice",
     "contribution_score": 1,
     "tier": "contributor"
   },
   "node": {},
-  "caveat": "POC token carries a session secret for local E2E testing. Production should replace this with the CONCEPT public-key handoff."
+  "caveat": "Public-key POC mode: prompt is encrypted for node key and response is encrypted for user key. Tracker still signs and transports public keys."
 }
 ```
 
 POC caveat:
 
-- `session_secret` in response/token is acceptable only for local POC.
-- Production must replace this with asymmetric key handoff.
+- Preferred POC mode is `crypto_mode: public-key`; token carries public keys, never private keys.
+- Legacy `session-secret` mode remains for compatibility only.
+- Production must add independent public-key fingerprint verification UX / alternate trust channels to mitigate tracker/node key substitution.
 
 ### 6.7 Contribution status
 
@@ -553,24 +563,25 @@ Production target from `CONCEPT.md`:
 
 POC simplification:
 
-- Tracker/proxy share HMAC secret.
-- Token carries session secret for local E2E testing.
-- This is not the final privacy model.
+- Tracker/proxy share HMAC secret for token verification.
+- Token carries user/node public keys, and the proxy decrypts with the node private key.
+- The client decrypts response with the user private key.
+- Tracker + node key-substitution risk remains; POC exposes fingerprints, but production must add verification UX / alternate trust channels.
 
 ### 7.4 Token requirements
 
 POC token:
 
 - HMAC-SHA256 signed
-- Includes `node_id`, `user_id`, `tier`, `iat`, `exp`, `jti`, `session_secret`
+- Includes `node_id`, `user_id`, `tier`, `iat`, `exp`, `jti`, `crypto_mode`; public-key mode also includes `user_public_key` and optionally `node_public_key`
 - Must reject invalid signature
 - Must reject expired token
 - Must reject node mismatch
 
 Production token:
 
-- Must remove symmetric session secret exposure from tracker response/token design.
-- Must integrate with public-key handoff.
+- Must prefer public-key mode.
+- Must add public-key fingerprint verification / alternate trust channel support.
 
 ---
 
@@ -668,7 +679,7 @@ Must verify:
 - contribution tier calculation
 - CLI register request construction
 - tasting token signature verification
-- subtext prompt encryption/decryption
+- subtext public-key prompt encryption/decryption
 - proxy token validation
 - prompt decryption
 - mock upstream generation
@@ -694,7 +705,14 @@ No external dependencies are required for the current POC.
 npm test
 ```
 
-### 11.2 Start tracker
+### 11.2 Generate keys
+
+```bash
+node src/cli/luckrig.js keygen --out-prefix node
+node src/cli/luckrig.js keygen --out-prefix user
+```
+
+### 11.3 Start tracker
 
 ```bash
 LUCKRIG_DEV=1 \
@@ -702,11 +720,12 @@ LUCKRIG_TRACKER_SECRET=dev-secret \
 npm start
 ```
 
-### 11.3 Start proxy
+### 11.4 Start proxy
 
 ```bash
 LUCKRIG_NODE_ID=first-5090-qwen3 \
 LUCKRIG_TRACKER_SECRET=dev-secret \
+LUCKRIG_NODE_PRIVATE_KEY="$(cat node-private.pem)" \
 node src/proxy/server.js
 ```
 
@@ -715,10 +734,12 @@ Mock mode is used when `LUCKRIG_UPSTREAM_URL` is unset.
 Forwarding mode:
 
 ```bash
-LUCKRIG_UPSTREAM_URL=http://127.0.0.1:8088/v1 node src/proxy/server.js
+LUCKRIG_NODE_PRIVATE_KEY="$(cat node-private.pem)" \
+LUCKRIG_UPSTREAM_URL=http://127.0.0.1:8088/v1 \
+node src/proxy/server.js
 ```
 
-### 11.4 CLI examples
+### 11.5 CLI examples
 
 ```bash
 node src/cli/luckrig.js register \
@@ -728,7 +749,8 @@ node src/cli/luckrig.js register \
   --model-name Qwen3-35B-A3B \
   --quantization Q4_K_XL \
   --gpu RTX_5090 \
-  --vram-gb 32
+  --vram-gb 32 \
+  --node-public-key "$(cat node-public.pem)"
 ```
 
 ```bash
@@ -736,7 +758,8 @@ node src/cli/luckrig.js token \
   --tracker http://127.0.0.1:8787 \
   --node-id first-5090-qwen3 \
   --user-id alice \
-  --contribution-score 1
+  --contribution-score 1 \
+  --user-public-key "$(cat user-public.pem)"
 ```
 
 ---
@@ -773,7 +796,7 @@ src/shared/                shared token/base64url helpers
 
 Before production, at minimum:
 
-1. Replace POC `session_secret` token flow with public-key handoff.
+1. Add production-grade public-key fingerprint verification and key-substitution mitigation.
 2. Introduce durable DB for registry, tokens, metrics summaries, contribution state.
 3. Implement real quota enforcement for limited users.
 4. Implement production node registration flow.
@@ -801,4 +824,4 @@ The current POC is considered valid when all of the following hold:
 - Client can parse pseudo SSE and create a local replay record.
 - Replay record can be saved and loaded.
 - Invalid token is rejected.
-- Docs clearly state that POC token/session-secret flow is not the final privacy design.
+- Docs clearly state that public-key mode still requires fingerprint verification to mitigate key substitution.

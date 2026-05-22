@@ -33,7 +33,8 @@
 6. **subtext**
    - `src/subtext/index.js`
    - Unicode variation selectorにAES-GCM envelopeを埋め込む
-   - POCではtracker tokenがsession secretを運ぶ
+   - X25519 + HKDF + AES-GCMの公開鍵envelopeに対応
+   - 後方互換のlegacy session-secret modeも残す
 
 7. **replay**
    - `src/client/replay.js`
@@ -42,7 +43,7 @@
 
 ## 重要なPOC caveat
 
-このPOCのtokenは、ローカルE2Eテストを成立させるために `session_secret` を含みます。これはCONCEPT.mdの最終形ではありません。
+初期POCのtokenは、ローカルE2Eテストを成立させるために `session_secret` を含んでいました。現在は `user_public_key` / `node_public_key` を使う **public-key POC mode** を実装済みで、`sha256:` 公開鍵fingerprintも返します。legacy session-secret modeは後方互換として残っています。
 
 CONCEPT上の最終形：
 
@@ -52,15 +53,24 @@ CONCEPT上の最終形：
 - tracker単独では平文を読めない
 - tracker + nodeが共謀すれば公開鍵すり替えが可能、というtrust modelを明示
 
-POC上の簡略化：
+現在のPOC上の簡略化：
 
 - tracker/proxyが共有するHMAC secretでtoken検証
-- token payload内のsession secretでAES-GCM
-- subtext隠蔽、buffer→pseudo SSE、replay schemaの成立を優先
+- token payloadには利用者公開鍵とノード公開鍵を含める（秘密鍵は含めない）
+- promptはノード公開鍵で暗号化し、proxyがノード秘密鍵で復号
+- responseは利用者公開鍵で暗号化し、clientが利用者秘密鍵で復号
+- tracker + nodeの共謀による公開鍵すり替えリスクはCONCEPT通り残る（POCはfingerprintを露出するが、検証UXは未実装）
 
 ## ローカル起動例
 
 Codexサンドボックス外の通常shell想定です。
+
+### key generation
+
+```bash
+node src/cli/luckrig.js keygen --out-prefix node
+node src/cli/luckrig.js keygen --out-prefix user
+```
 
 ### tracker
 
@@ -75,6 +85,7 @@ npm start
 ```bash
 LUCKRIG_NODE_ID=first-5090-qwen3 \
 LUCKRIG_TRACKER_SECRET=dev-secret \
+LUCKRIG_NODE_PRIVATE_KEY="$(cat node-private.pem)" \
 node src/proxy/server.js
 ```
 
@@ -98,7 +109,8 @@ node src/cli/luckrig.js register \
   --quantization Q4_K_XL \
   --gpu RTX_5090 \
   --vram-gb 32 \
-  --context-length 65536
+  --context-length 65536 \
+  --node-public-key "$(cat node-public.pem)"
 ```
 
 ### token
@@ -108,7 +120,8 @@ node src/cli/luckrig.js token \
   --tracker http://127.0.0.1:8787 \
   --node-id first-5090-qwen3 \
   --user-id alice \
-  --contribution-score 1
+  --contribution-score 1 \
+  --user-public-key "$(cat user-public.pem)"
 ```
 
 ### tests
@@ -125,7 +138,8 @@ npm test
 - health/telemetry metrics JSONL生成
 - token発行API
 - contribution tier判定
-- subtext encrypt/decrypt
+- X25519公開鍵ペア生成
+- subtext public-key encrypt/decrypt
 - proxy token検証
 - prompt復号 → mock upstream → response暗号化
 - pseudo SSE生成
@@ -134,7 +148,7 @@ npm test
 
 ## まだPOC外のこと
 
-- production-grade公開鍵ハンドオフ
+- production-grade公開鍵フィンガープリント検証 / 鍵すり替え対策
 - 永続DB
 - 本物のquota enforcement
 - NSFW filter

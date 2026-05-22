@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { decryptJsonFromSubtext } from '../subtext/index.js';
+import { decryptJsonFromSubtext, decryptJsonFromSubtextWithPrivateKey } from '../subtext/index.js';
 
 export const DEFAULT_HISTORY_DIR = path.join(os.homedir(), '.luckrig', 'history');
 
@@ -71,9 +71,11 @@ export function buildReplayRecord({
   };
 }
 
-export function replayFromEncryptedSseChunks(chunks, { sessionSecret, ttft_ms = null } = {}) {
+export function replayFromEncryptedSseChunks(chunks, { sessionSecret, userPrivateKey, ttft_ms = null } = {}) {
   const { encryptedContent, chunk_timestamps } = parsePseudoSseChunks(chunks);
-  const envelope = decryptJsonFromSubtext(encryptedContent, { sessionSecret });
+  const envelope = userPrivateKey
+    ? decryptJsonFromSubtextWithPrivateKey(encryptedContent, { privateKey: userPrivateKey })
+    : decryptJsonFromSubtext(encryptedContent, { sessionSecret });
   return buildReplayRecord({
     prompt: envelope.prompt?.prompt ?? envelope.prompt,
     response: envelope.response,
