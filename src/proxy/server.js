@@ -77,6 +77,32 @@ function extractSubtextMessage(body) {
   return subtextMessage;
 }
 
+function extractPlainPrompt(body) {
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  if (messages.length === 0) {
+    throw Object.assign(new Error('messages[] is empty'), { statusCode: 400 });
+  }
+  let firstUserContent = null;
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') {
+      throw Object.assign(new Error('every message must be an object'), { statusCode: 400 });
+    }
+    const role = typeof message.role === 'string' ? message.role.toLowerCase() : '';
+    if (role !== 'user') {
+      // Reject system/assistant messages to keep this POC minimal and to avoid
+      // ambiguity about whose role is being injected.
+      throw Object.assign(new Error(`only role="user" is allowed via luckrig proxy; got role="${message.role ?? ''}"`), { statusCode: 400 });
+    }
+    if (firstUserContent === null) {
+      firstUserContent = typeof message.content === 'string' ? message.content : '';
+    }
+  }
+  if (firstUserContent === null || firstUserContent.length === 0) {
+    throw Object.assign(new Error('plain mode requires non-empty user prompt content'), { statusCode: 400 });
+  }
+  return firstUserContent;
+}
+
 
 function queueSnapshot() {
   return { ...queueState, depth: queueState.waiting };
@@ -169,6 +195,55 @@ function buildPseudoSseChunks(encryptedResponseText, { created = Math.floor(Date
   ];
 }
 
+function splitForRealSse(text, { maxPieces = 32, minPieceChars = 2 } = {}) {
+  const str = String(text ?? '');
+  if (str.length === 0) return [];
+  // Split on whitespace boundaries to approximate token-like chunks, then pack
+  // into pieces of at least `minPieceChars` chars (avoid emitting hundreds of
+  // single-char chunks for short responses while still letting the client
+  // measure tok/s from arrival deltas).
+  const parts = str.split(/(\s+)/).filter((s) => s.length > 0);
+  const pieces = [];
+  let buf = '';
+  for (const part of parts) {
+    buf += part;
+    if (buf.length >= minPieceChars) {
+      pieces.push(buf);
+      buf = '';
+    }
+  }
+  if (buf.length > 0) pieces.push(buf);
+  if (pieces.length <= maxPieces) return pieces;
+  // If we ended up with too many pieces, glue adjacent ones to stay under cap.
+  const out = [];
+  const groupSize = Math.ceil(pieces.length / maxPieces);
+  for (let i = 0; i < pieces.length; i += groupSize) {
+    out.push(pieces.slice(i, i + groupSize).join(''));
+  }
+  return out;
+}
+
+function buildPlainSseChunks(responseText, { created = Math.floor(Date.now() / 1000), model = 'luckrig-proxy', timing = {} } = {}) {
+  const id = `chatcmpl-luckrig-${created}`;
+  const pieces = splitForRealSse(responseText);
+  const chunks = [];
+  chunks.push(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] })}\n\n`);
+  if (pieces.length === 0) {
+    chunks.push(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta: { content: '' }, finish_reason: null }] })}\n\n`);
+  } else {
+    for (const piece of pieces) {
+      chunks.push(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta: { content: piece }, finish_reason: null }] })}\n\n`);
+    }
+  }
+  chunks.push(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`);
+  // Trailing non-OpenAI luckrig metadata frame so the client can pick up
+  // proxy-side timing without needing a separate endpoint. Unknown fields are
+  // ignored by vanilla OpenAI SSE parsers.
+  chunks.push(`data: ${JSON.stringify({ id, object: 'luckrig.timing', created, ...timing })}\n\n`);
+  chunks.push('data: [DONE]\n\n');
+  return chunks;
+}
+
 export async function processChatCompletion({
   body,
   authHeader,
@@ -183,11 +258,22 @@ export async function processChatCompletion({
   if (!token) throw Object.assign(new Error('missing bearer token'), { statusCode: 401 });
   const tokenPayload = verifyTastingToken(token, { secret: trackerSecret, expectedNodeId: nodeId, nowMs });
 
-  const encryptedPromptText = extractSubtextMessage(body);
-  const cryptoMode = tokenPayload.crypto_mode ?? 'session-secret';
-  const prompt = cryptoMode === 'public-key'
-    ? decryptJsonFromSubtextWithPrivateKey(encryptedPromptText, { privateKey: nodePrivateKey })
-    : decryptJsonFromSubtext(encryptedPromptText, { sessionSecret: tokenPayload.session_secret });
+  const cryptoMode = tokenPayload.crypto_mode ?? 'plain';
+  let prompt;
+  if (cryptoMode === 'plain') {
+    // plain mode (baseline): OpenAI-compatible plaintext path. Forward upstream
+    // and stream real SSE. No subtext encode/decode.
+    const plainText = extractPlainPrompt(body);
+    prompt = { prompt: plainText };
+  } else if (cryptoMode === 'public-key') {
+    const encryptedPromptText = extractSubtextMessage(body);
+    prompt = decryptJsonFromSubtextWithPrivateKey(encryptedPromptText, { privateKey: nodePrivateKey });
+  } else if (cryptoMode === 'session-secret') {
+    const encryptedPromptText = extractSubtextMessage(body);
+    prompt = decryptJsonFromSubtext(encryptedPromptText, { sessionSecret: tokenPayload.session_secret });
+  } else {
+    throw Object.assign(new Error(`unsupported crypto_mode in token: ${cryptoMode}`), { statusCode: 400 });
+  }
 
   const promptPolicy = assertPromptAllowed(prompt);
 
@@ -217,9 +303,47 @@ export async function processChatCompletion({
     queue_wait_sec: Number(queueWaitSec.toFixed(3)),
     generation_sec: Number(generationSec.toFixed(3)),
     proxy_ttft_ms: upstream.upstream_ttft_ms ?? null,
+    crypto_mode: cryptoMode,
     queue_snapshot: queueSnapshot(),
     upstream: upstream.upstream,
   };
+
+  if (cryptoMode === 'plain') {
+    const timing = {
+      node_id: nodeId,
+      crypto_mode: cryptoMode,
+      queue_wait_sec: responseEnvelope.queue_wait_sec,
+      generation_sec: responseEnvelope.generation_sec,
+      proxy_ttft_ms: responseEnvelope.proxy_ttft_ms,
+      limited_output_truncated: tiered.limited,
+    };
+    if (body?.stream) {
+      return {
+        kind: 'plain-sse',
+        status: 200,
+        token_payload: tokenPayload,
+        prompt,
+        response_envelope: responseEnvelope,
+        chunks: buildPlainSseChunks(tiered.text, { model: body.model ?? 'luckrig-proxy', timing }),
+      };
+    }
+    return {
+      kind: 'plain-json',
+      status: 200,
+      token_payload: tokenPayload,
+      prompt,
+      response_envelope: responseEnvelope,
+      body: {
+        id: `chatcmpl-luckrig-${Date.now()}`,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: body.model ?? 'luckrig-proxy',
+        choices: [{ index: 0, message: { role: 'assistant', content: tiered.text }, finish_reason: 'stop' }],
+        luckrig_timing: timing,
+      },
+    };
+  }
+
   const encryptedResponseText = cryptoMode === 'public-key'
     ? encryptJsonToSubtextForPublicKey(responseEnvelope, {
       publicKey: tokenPayload.user_public_key,
@@ -270,7 +394,7 @@ export async function handleProxyRequest(req, res, options = {}) {
         ok: true,
         node_id: options.nodeId ?? NODE_ID,
         engine: { name: 'luckrig-proxy', version: '0.0.0', backend: options.upstreamUrl || UPSTREAM_URL ? 'openai-compatible' : 'mock' },
-        crypto_modes: ['public-key', 'session-secret'],
+        crypto_modes: ['plain', 'public-key', 'session-secret'],
         queue: queueSnapshot(),
         error_rate: 0,
       });
@@ -284,7 +408,7 @@ export async function handleProxyRequest(req, res, options = {}) {
         authHeader: req.headers.authorization,
         ...options,
       });
-      if (result.kind === 'sse') {
+      if (result.kind === 'sse' || result.kind === 'plain-sse') {
         res.writeHead(result.status, corsHeaders({
           'content-type': 'text/event-stream; charset=utf-8',
           'cache-control': 'no-store',

@@ -393,25 +393,41 @@ Current evidence:
 
 ### E6. Queue UX and Pseudo SSE
 
-#### US-6.1 — Buffer generation before pseudo streaming
+#### US-6.1 — Plain mode is the baseline transport
+
+As a **Client Integrator**, I want plain mode to be the default token mode, so that a vanilla OpenAI client works against luckrig without subtext-aware code.
+
+Acceptance criteria:
+
+- When the token request does not provide `user_public_key` and does not specify another mode, the tracker returns `crypto_mode: plain`.
+- Proxy plain mode forwards plaintext user prompts to upstream and streams real (per-chunk) SSE back.
+- Plain mode pseudo SSE is NOT subtext-encoded.
+- A trailing `luckrig.timing` SSE event carries proxy-measured timing fields.
+
+Current evidence:
+
+- `issueTastingToken()` defaults `crypto_mode` to `plain` when no `user_public_key` is provided.
+- `processChatCompletion()` branches on `crypto_mode` and uses `buildPlainSseChunks` for plain mode.
+- `scripts/e2e-test.js` plain mode block asserts `hasSubtext(...) === false` and multi-chunk SSE.
+
+#### US-6.2 — Buffer generation before pseudo streaming (subtext mode only)
 
 As a **Taster**, I want the product to frame waiting as queue time, so that I do not interpret subtext buffering as a slow model.
 
 Acceptance criteria:
 
-- Proxy buffers upstream response before sending encrypted result.
+- In subtext mode, proxy buffers upstream response before sending encrypted result.
 - Response envelope contains queue/generation timings.
-- Pseudo SSE sends encrypted content after buffering.
+- Pseudo SSE sends encrypted content after buffering (subtext mode only).
 - UI should eventually show queue state before playback.
 
 Current evidence:
 
 - `processChatCompletion()`
 - `buildPseudoSseChunks()`
-- Browser tasting panel requests a token, encrypts prompt, calls proxy, decrypts pseudo SSE, and offers replay JSON download
-- Browser POC uses public-key mode when node public key exists, with legacy session-secret fallback for keyless nodes
+- Browser tasting panel chooses plain (default) or subtext mode, calls proxy, parses SSE (real or pseudo), and offers replay JSON download
 
-#### US-6.2 — Preserve OpenAI-compatible shape
+#### US-6.3 — Preserve OpenAI-compatible shape
 
 As a **Client Integrator**, I want the proxy endpoint to resemble OpenAI Chat Completions, so that integration remains familiar.
 
@@ -425,6 +441,7 @@ Current evidence:
 
 - `src/proxy/server.js`
 - E2E pseudo SSE assertion
+- E2E plain SSE assertion (`scripts/e2e-test.js` plain mode block)
 
 ---
 
@@ -445,6 +462,24 @@ Current evidence:
 
 - `src/client/replay.js`
 - E2E save/load test
+
+#### US-7.3 — Opt-in timing metadata upload
+
+As a **Reproducer**, I want a way to share my measured tok/s for a node without sharing my prompt or response, so that the public list can show community-measured numbers without compromising local-first privacy.
+
+Acceptance criteria:
+
+- A dedicated tracker endpoint accepts timing-only metadata.
+- The endpoint rejects any payload that contains prompt, response, messages, chunk timestamps, or other body fields.
+- Aggregated tok/s and TTFT are surfaced in the public node list as `community_timing` (samples count, p50).
+- Upload is opt-in per request from the UI; default is off.
+
+Current evidence:
+
+- `POST /api/replay/timing` in `src/tracker/server.js` with strict allowlist (`TIMING_ALLOWED_FIELDS` / `TIMING_DISALLOWED_KEY_HINTS`).
+- `timingPayloadFromReplay()` and `uploadTimingPayload()` in `src/client/replay.js`.
+- Browser UI "このリグのタイミングを共有する (opt-in)" button (disabled until a replay exists).
+- E2E asserts that a payload with `prompt` is rejected (400) and that `community_timing.samples_count` is reflected in `GET /api/nodes`.
 
 #### US-7.2 — Replay generation timing
 
@@ -714,4 +749,3 @@ A user story is done only when:
 - The story does not introduce node self-reported benchmark authority.
 - Runtime prompt/response data is not uploaded to tracker by default.
 - `npm test` passes when implementation changes code.
-

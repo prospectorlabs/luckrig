@@ -280,6 +280,33 @@ dd { margin: 4px 0 0; font-weight: 650; overflow-wrap: anywhere; }
   background: rgba(255,255,255,.025);
 }
 .contribution-panel strong { color: var(--text); margin-right: 6px; }
+.community-timing {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  background: rgba(198,255,107,.04);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.community-timing strong { color: var(--accent); }
+.community-timing-empty { color: var(--muted); }
+.timing-upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+.upload-timing {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.timing-upload-status { color: var(--muted); font-size: 12px; }
+.timing-upload-help { color: var(--muted); font-size: 11px; margin-top: 6px; }
 .fingerprint-verify-actions {
   display: flex;
   flex-wrap: wrap;

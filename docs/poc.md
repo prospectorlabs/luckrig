@@ -1,6 +1,6 @@
 # luckrig POC
 
-このPOCは、CONCEPT.mdの「最小実装の順序」を一通りつなぎ、**tracker → token → node proxy → subtext → pseudo SSE → replay** の最短E2Eを検証するためのものです。
+このPOCは、CONCEPT.mdの「最小実装の順序」を一通りつなぎ、**tracker → token → node proxy → (plain | subtext) → SSE → replay → opt-in timing upload** の最短E2Eを検証するためのものです。
 
 ## 実装済みの流れ
 
@@ -28,7 +28,9 @@
    - `src/proxy/server.js`
    - `/health`
    - `/v1/chat/completions`
-   - Bearer token検証、subtext復号、upstream呼び出し、レスポンスbuffer、一括暗号化、pseudo SSE返却
+   - Bearer token検証、token `crypto_mode` に応じて plain (真SSE) / subtext (擬似SSE) に分岐
+   - plain mode: 平文のままupstreamへ転送し、real SSEで返す（trailing `luckrig.timing` event付き）
+   - subtext mode: subtext復号、upstream呼び出し、レスポンスbuffer、一括暗号化、pseudo SSE返却
 
 6. **subtext**
    - `src/subtext/index.js`
@@ -38,8 +40,14 @@
 
 7. **replay**
    - `src/client/replay.js`
-   - pseudo SSEから暗号化レスポンスを取り出して復号
+   - plain SSE / pseudo SSE 双方をparseしてreplayレコードを生成
    - `~/.luckrig/history/` 互換のschema_version付きJSONを保存
+
+8. **opt-in timing upload**
+   - `POST /api/replay/timing`
+   - 利用者がUIで明示的にボタンを押した場合のみ送信される
+   - プロンプト/レスポンス本文は送らず、tok/s等のタイミングだけ送信
+   - 公開ノードリストの `community_timing` として p50 集計が反映される
 
 ## 重要なPOC caveat
 

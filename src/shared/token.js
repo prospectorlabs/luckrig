@@ -28,12 +28,24 @@ export function issueTastingToken({
   sessionSecret = createSessionSecret(),
   userPublicKey = null,
   nodePublicKey = null,
-  cryptoMode = userPublicKey ? 'public-key' : 'session-secret',
+  cryptoMode = userPublicKey ? 'public-key' : 'plain',
 }) {
   if (!secret) throw new Error('secret is required');
   if (!nodeId) throw new Error('nodeId is required');
+  if (!['plain', 'public-key', 'session-secret'].includes(cryptoMode)) {
+    throw new Error(`unsupported cryptoMode: ${cryptoMode}`);
+  }
   const userPublicKeyFingerprint = userPublicKey ? publicKeyFingerprint(userPublicKey) : null;
   const nodePublicKeyFingerprint = nodePublicKey ? publicKeyFingerprint(nodePublicKey) : null;
+
+  let modeFields;
+  if (cryptoMode === 'public-key') {
+    modeFields = { user_public_key: userPublicKey, user_public_key_fingerprint: userPublicKeyFingerprint };
+  } else if (cryptoMode === 'session-secret') {
+    modeFields = { session_secret: sessionSecret };
+  } else {
+    modeFields = {}; // plain mode carries no key material
+  }
 
   const payload = {
     v: 1,
@@ -43,7 +55,7 @@ export function issueTastingToken({
     user_id: userId,
     tier,
     crypto_mode: cryptoMode,
-    ...(cryptoMode === 'public-key' ? { user_public_key: userPublicKey, user_public_key_fingerprint: userPublicKeyFingerprint } : { session_secret: sessionSecret }),
+    ...modeFields,
     ...(nodePublicKey ? { node_public_key: nodePublicKey, node_public_key_fingerprint: nodePublicKeyFingerprint } : {}),
     iat: Math.floor(nowMs / 1000),
     exp: Math.floor(nowMs / 1000) + ttlSec,

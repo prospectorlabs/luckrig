@@ -33,7 +33,8 @@ tracker
 ### 2.1 In scope for v1
 
 - Text generation only
-- OpenAI-compatible Chat Completions style API
+- OpenAI-compatible Chat Completions style API as the baseline transport (**plain mode**), so vanilla OpenAI clients work without subtext-aware code
+- Optional **subtext mode** that wraps prompt / response in AES-GCM + Unicode variation selectors, opt-in per request
 - Public node listing
 - Liveness monitoring
 - Basic telemetry collection
@@ -47,9 +48,9 @@ tracker
 - Browser identity persistence for repeated tastings
 - Optional out-of-band fingerprint URL verification
 - IP-based token rate limiting
-- subtext-based prompt / response hiding
-- Buffered generation with pseudo SSE playback
+- Buffered generation with pseudo SSE playback (subtext mode only)
 - Local replay persistence
+- Opt-in timing-metadata upload from client to tracker (no prompt / response body)
 
 ### 2.2 Out of scope for v1
 
@@ -76,10 +77,10 @@ The following are intentional design decisions from `CONCEPT.md` and must not be
    Do not sort default lists by highest GPU performance.
 
 4. **tok/s is not node self-report**  
-   It must come from client-side replay / chunk timestamp evidence.
+   In plain mode it is measured client-side from real SSE chunk timestamps. In subtext mode it is measured by the node proxy (because pseudo SSE chunk timestamps reflect replay rate, not generation rate) and surfaced inside the response envelope; the client persists that value verbatim into replay. In both cases the listing-level self-report is not the source of truth.
 
 5. **Replay is local-first**  
-   Prompt and response replay data are saved locally, not uploaded to tracker by default.
+   Prompt and response body always live locally only. Timing-only metadata may be uploaded to tracker **explicitly per request by the user**, never automatically.
 
 6. **Privacy is limited and must be stated honestly**  
    Use the phrase “頑張らなければ見えない” carefully: tcpdump/logs should not reveal plaintext, but a node operator who instruments the process can still see plaintext.
@@ -182,7 +183,7 @@ POC command examples are documented in [`docs/poc.md`](./docs/poc.md).
 
 Implementation: `src/subtext/index.js`
 
-The POC encodes encrypted bytes into Unicode variation selectors.
+subtext is the **optional defense-in-depth layer**, not the baseline. The POC encodes encrypted bytes into Unicode variation selectors.
 
 - AES-256-GCM provides confidentiality / integrity for the payload envelope.
 - Variation selectors provide invisible embedding inside a cover string.
@@ -192,6 +193,7 @@ Implementation note:
 
 - Current POC supports public-key envelopes using X25519 + HKDF-SHA256 + AES-256-GCM and exposes `sha256:` SPKI fingerprints for public keys.
 - Legacy session-secret mode remains only for compatibility tests and should not be used as the preferred path.
+- subtext mode forces full-buffered generation and pseudo SSE. Plain mode is the baseline and should be used whenever true SSE streaming or vanilla OpenAI compatibility is needed.
 
 ### 3.5 Replay
 
@@ -475,8 +477,9 @@ POC response:
 
 Implementation note:
 
-- Preferred POC mode is `crypto_mode: public-key`; token carries public keys, never private keys.
-- Legacy `session-secret` mode remains for compatibility only.
+- Default token mode is `crypto_mode: plain` (OpenAI-compatible baseline) when the client does not supply `user_public_key` and does not explicitly request another mode.
+- `crypto_mode: public-key` (subtext mode with X25519 / HKDF / AES-GCM) is selected when the client supplies `user_public_key` or explicitly requests `"crypto_mode": "public-key"`.
+- `crypto_mode: session-secret` (subtext mode with shared secret) remains for compatibility only and must be requested explicitly.
 - Current UI displays/copies fingerprints and offers exact fingerprint input or URL verification as optional self-checks. Stronger alternate trust channels can be added later to further mitigate tracker/node key substitution.
 
 ### 6.7 Contribution status
@@ -531,12 +534,22 @@ Content-Type: application/json
   "model": "luckrig-poc",
   "stream": true,
   "messages": [
-    { "role": "user", "content": "cover text + invisible subtext" }
+    { "role": "user", "content": "plain prompt (plain mode) OR cover text + invisible subtext (subtext mode)" }
   ]
 }
 ```
 
-Behavior:
+Behavior (plain mode, default baseline):
+
+1. Verify Bearer token.
+2. Verify token `node_id` matches proxy node ID.
+3. Reject any non-`user` message.
+4. Forward the plaintext user prompt to upstream (or mock).
+5. Stream upstream SSE chunks back as they arrive (or emit a single chunk for non-streaming upstream / mock).
+6. Apply limited-tier truncation when token tier is `limited`.
+7. Tag the final SSE event with a `luckrig.timing` payload containing measured proxy-side timing.
+
+Behavior (subtext mode, opt-in):
 
 1. Verify Bearer token.
 2. Verify token `node_id` matches proxy node ID.
@@ -548,6 +561,43 @@ Behavior:
 8. Encrypt response envelope.
 9. Apply limited-tier truncation when token tier is `limited`.
 10. Return pseudo SSE chunks when `stream: true`.
+
+### 6.12 Opt-in timing-metadata upload
+
+```http
+POST /api/replay/timing
+Content-Type: application/json
+
+{
+  "schema_version": 1,
+  "node_id": "first-5090-qwen3",
+  "mode": "plain",
+  "user_id": "alice",
+  "created_at": "2026-05-22T07:12:34.000Z",
+  "tok_per_sec": 267.0,
+  "ttft_ms": 842,
+  "proxy_ttft_ms": 712,
+  "network_ttft_ms": 842,
+  "generation_sec": 8.3,
+  "queue_wait_sec": 12.1,
+  "output_tokens": 2215,
+  "tokenizer": "luckrig-heuristic-v1",
+  "tokenizer_model_family": "qwen"
+}
+```
+
+Behavior:
+
+1. Reject any payload that contains `prompt`, `response`, `chunk_timestamps`, `messages`, or other body fields. Only allow the timing-only allowlist.
+2. Append to `data/timing.jsonl` (JSONL append-only).
+3. Update an in-memory aggregate per node (`samples_count`, `tok_per_sec` p50, `ttft_ms` p50, last upload at).
+4. Aggregates are surfaced in `GET /api/nodes` so the public list shows community-measured tok/s.
+
+Privacy guarantees:
+
+- This endpoint is only ever hit when the client UI / CLI explicitly invokes it; default is off.
+- The endpoint rejects any oversized body and any non-allowlisted field as a defense against accidental upload of prompt or response body.
+- Aggregates are exposed; raw per-upload rows are not exposed via public APIs.
 
 ---
 
@@ -590,7 +640,7 @@ POC simplification:
 Current token:
 
 - HMAC-SHA256 signed
-- Includes `node_id`, `user_id`, `tier`, `iat`, `exp`, `jti`, `crypto_mode`; public-key mode also includes `user_public_key` and optionally `node_public_key`
+- Includes `node_id`, `user_id`, `tier`, `iat`, `exp`, `jti`, `crypto_mode`; public-key mode also includes `user_public_key` and optionally `node_public_key`; plain mode carries no key material
 - Must reject invalid signature
 - Must reject expired token
 - Must reject node mismatch
@@ -651,12 +701,14 @@ Permanent access rights and Showcase ranking must remain separate systems.
 
 ### 9.2 Not authoritative yet
 
-- `tok_per_sec` in POC replay uses approximate token estimation.
-- `ttft_ms` is carried in replay schema but not measured from a real upstream timing source in POC.
+- `tok_per_sec` in POC replay uses approximate token estimation (`luckrig-heuristic-v1`).
+- In plain mode, `chunk_timestamps` reflect true upstream SSE chunk arrival, so `tok_per_sec` is a real client-side measurement (modulo token-count approximation).
+- In subtext mode, `chunk_timestamps` reflect pseudo SSE replay rate, not real generation rate. The authoritative tok/s in subtext mode is the proxy-measured value carried inside the response envelope.
+- `ttft_ms` in subtext mode is the proxy-measured upstream TTFT; in plain mode it is the client-observed first-chunk time (network-inclusive).
 
 ### 9.3 Benchmark rule
 
-Benchmark fields must be derived from client/proxy timestamp evidence, not from node self-report.
+Benchmark fields must be derived from client / proxy timestamp evidence, not from listing-level node self-report. Aggregate community tok/s requires opt-in timing upload (§6.12).
 
 ---
 
@@ -838,11 +890,15 @@ The current POC is considered valid when all of the following hold:
 - Public seed nodes load from registry.
 - Health probes append metrics samples without committing runtime JSONL.
 - Tracker can issue a POC tasting token for a node.
+- Tracker default token mode is `plain` when no key material is provided.
 - Proxy can validate the token and node binding.
+- Proxy plain mode forwards a plaintext OpenAI-compatible request to upstream and streams real (per-chunk) SSE back.
 - Prompt can be encrypted into subtext and decrypted by proxy.
 - Proxy can generate or forward a response after buffering.
 - Response can be encrypted into subtext and returned through pseudo SSE.
 - Client can parse pseudo SSE and create a local replay record.
 - Replay record can be saved and loaded.
+- Client can opt-in upload timing-only metadata to tracker (no prompt / response body), and the tracker rejects any disallowed field.
+- Public node list surfaces community-aggregated tok/s when timing uploads exist.
 - Invalid token is rejected.
 - Docs and UI require a privacy caveat acknowledgement, display optional fingerprint self-checks, and clearly state remaining trust limits.

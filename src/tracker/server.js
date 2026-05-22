@@ -18,6 +18,7 @@ const HOST = process.env.LUCKRIG_HOST ?? '127.0.0.1';
 const REGISTRY_PATH = path.resolve(ROOT, process.env.LUCKRIG_REGISTRY_PATH ?? 'data/nodes.seed.json');
 const METRICS_PATH = path.resolve(ROOT, process.env.LUCKRIG_METRICS_PATH ?? 'data/metrics.jsonl');
 const TOKEN_USAGE_PATH = path.resolve(ROOT, process.env.LUCKRIG_TOKEN_USAGE_PATH ?? 'data/token-usage.jsonl');
+const TIMING_PATH = path.resolve(ROOT, process.env.LUCKRIG_TIMING_PATH ?? 'data/timing.jsonl');
 const DB_PATH = path.resolve(ROOT, process.env.LUCKRIG_DB_PATH ?? 'data/luckrig.sqlite');
 const USE_SQLITE = process.env.LUCKRIG_USE_SQLITE !== '0';
 const HEALTH_INTERVAL_MS = Number.parseInt(process.env.LUCKRIG_HEALTH_INTERVAL_MS ?? '30000', 10);
@@ -420,6 +421,149 @@ function listMetricsSummaries() {
   return [...nodes.keys()].map((nodeId) => getMetricsSummary(nodeId));
 }
 
+// ----- opt-in timing metadata (per CONCEPT §opt-in timing metadata sharing) -----
+
+const TIMING_ALLOWED_FIELDS = new Set([
+  'schema_version',
+  'node_id',
+  'mode',
+  'user_id',
+  'created_at',
+  'tok_per_sec',
+  'ttft_ms',
+  'proxy_ttft_ms',
+  'network_ttft_ms',
+  'generation_sec',
+  'queue_wait_sec',
+  'output_tokens',
+  'tokenizer',
+  'tokenizer_model_family',
+  'limited_output_truncated',
+]);
+const TIMING_DISALLOWED_KEY_HINTS = ['prompt', 'response', 'message', 'chunk_timestamp', 'content', 'envelope', 'body'];
+const TIMING_MAX_BYTES = 4 * 1024;
+
+const timingByNode = new Map();
+
+function percentile(sortedValues, p) {
+  if (sortedValues.length === 0) return null;
+  const idx = Math.min(sortedValues.length - 1, Math.max(0, Math.floor((sortedValues.length - 1) * p)));
+  return sortedValues[idx];
+}
+
+function updateTimingAggregate(sample) {
+  if (!sample?.node_id) return;
+  const bucket = timingByNode.get(sample.node_id) ?? { samples: [], last_uploaded_at: null };
+  bucket.samples.push(sample);
+  // Cap at 200 samples per node to bound memory; oldest dropped.
+  if (bucket.samples.length > 200) bucket.samples.splice(0, bucket.samples.length - 200);
+  bucket.last_uploaded_at = sample.created_at ?? nowIso();
+  timingByNode.set(sample.node_id, bucket);
+}
+
+function getCommunityTiming(nodeId) {
+  const bucket = timingByNode.get(nodeId);
+  if (!bucket || bucket.samples.length === 0) {
+    return { samples_count: 0, tok_per_sec_p50: null, ttft_ms_p50: null, last_uploaded_at: null };
+  }
+  const tps = bucket.samples
+    .map((s) => Number(s.tok_per_sec))
+    .filter((v) => Number.isFinite(v) && v > 0)
+    .sort((a, b) => a - b);
+  const ttfts = bucket.samples
+    .map((s) => Number(s.ttft_ms ?? s.proxy_ttft_ms ?? s.network_ttft_ms))
+    .filter((v) => Number.isFinite(v) && v >= 0)
+    .sort((a, b) => a - b);
+  return {
+    samples_count: bucket.samples.length,
+    tok_per_sec_p50: percentile(tps, 0.5),
+    ttft_ms_p50: percentile(ttfts, 0.5),
+    last_uploaded_at: bucket.last_uploaded_at,
+  };
+}
+
+function validateTimingPayload(input, { maxBytes = TIMING_MAX_BYTES } = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw Object.assign(new Error('timing payload must be a JSON object'), { statusCode: 400 });
+  }
+  const raw = JSON.stringify(input);
+  if (raw.length > maxBytes) {
+    throw Object.assign(new Error('timing payload exceeds size budget'), { statusCode: 413 });
+  }
+  for (const key of Object.keys(input)) {
+    const lower = key.toLowerCase();
+    if (TIMING_DISALLOWED_KEY_HINTS.some((hint) => lower.includes(hint))) {
+      throw Object.assign(new Error(`disallowed field "${key}" in timing payload`), { statusCode: 400 });
+    }
+    if (!TIMING_ALLOWED_FIELDS.has(key)) {
+      throw Object.assign(new Error(`unknown field "${key}" in timing payload`), { statusCode: 400 });
+    }
+    const value = input[key];
+    if (value !== null && typeof value === 'object') {
+      throw Object.assign(new Error(`nested object not allowed in timing payload (field: ${key})`), { statusCode: 400 });
+    }
+  }
+  if (input.schema_version !== 1) {
+    throw Object.assign(new Error('schema_version must be 1'), { statusCode: 400 });
+  }
+  if (typeof input.node_id !== 'string' || !nodes.has(input.node_id)) {
+    throw Object.assign(new Error('unknown node_id'), { statusCode: 404 });
+  }
+  if (input.mode && !['plain', 'public-key', 'session-secret'].includes(input.mode)) {
+    throw Object.assign(new Error(`unsupported mode: ${input.mode}`), { statusCode: 400 });
+  }
+  return {
+    schema_version: 1,
+    node_id: input.node_id,
+    mode: input.mode ?? 'plain',
+    user_id: typeof input.user_id === 'string' ? input.user_id.slice(0, 128) : 'anonymous',
+    created_at: typeof input.created_at === 'string' ? input.created_at : nowIso(),
+    tok_per_sec: asOptionalNumber(input.tok_per_sec, null),
+    ttft_ms: asOptionalNumber(input.ttft_ms, null),
+    proxy_ttft_ms: asOptionalNumber(input.proxy_ttft_ms, null),
+    network_ttft_ms: asOptionalNumber(input.network_ttft_ms, null),
+    generation_sec: asOptionalNumber(input.generation_sec, null),
+    queue_wait_sec: asOptionalNumber(input.queue_wait_sec, null),
+    output_tokens: asOptionalInteger(input.output_tokens, null),
+    tokenizer: typeof input.tokenizer === 'string' ? input.tokenizer.slice(0, 64) : null,
+    tokenizer_model_family: typeof input.tokenizer_model_family === 'string' ? input.tokenizer_model_family.slice(0, 64) : null,
+    limited_output_truncated: input.limited_output_truncated === true,
+    stored_at: nowIso(),
+  };
+}
+
+async function appendTimingSample(sample) {
+  updateTimingAggregate(sample);
+  try {
+    await mkdir(path.dirname(TIMING_PATH), { recursive: true });
+    await appendFile(TIMING_PATH, `${JSON.stringify(sample)}\n`, 'utf8');
+  } catch (error) {
+    console.error('[tracker] failed to append timing sample', error);
+  }
+}
+
+async function loadTiming() {
+  timingByNode.clear();
+  let raw;
+  try {
+    raw = await readFile(TIMING_PATH, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const sample = JSON.parse(line);
+      if (sample?.schema_version === 1 && sample?.node_id && nodes.has(sample.node_id)) {
+        updateTimingAggregate(sample);
+      }
+    } catch {
+      // Ignore malformed historical lines.
+    }
+  }
+}
+
 function contributionStatus({ userId = 'anonymous', contributionScore = 0 } = {}) {
   const score = asOptionalNumber(contributionScore, 0) ?? 0;
   const tier = score >= FULL_ACCESS_SCORE_THRESHOLD ? 'contributor' : 'limited';
@@ -697,6 +841,7 @@ function publicNode(node, rarityScore) {
     contribution,
     health: node.health,
     observations: getMetricsSummary(node.id),
+    community_timing: getCommunityTiming(node.id),
   };
 }
 
@@ -985,6 +1130,19 @@ async function handleApi(req, res, url) {
     const node = nodes.get(nodeId);
     const userPublicKey = asOptionalString(body.user_public_key ?? body.userPublicKey);
     const nodePublicKey = node?.node_public_key || asOptionalString(body.node_public_key ?? body.nodePublicKey);
+    const requestedCryptoMode = asOptionalString(body.crypto_mode ?? body.cryptoMode);
+    let cryptoMode;
+    if (requestedCryptoMode) {
+      if (!['plain', 'public-key', 'session-secret'].includes(requestedCryptoMode)) {
+        json(res, 400, { error: `unsupported crypto_mode: ${requestedCryptoMode}` }, corsHeaders());
+        return;
+      }
+      cryptoMode = requestedCryptoMode;
+    } else if (userPublicKey) {
+      cryptoMode = 'public-key';
+    } else {
+      cryptoMode = 'plain';
+    }
     const issued = issueTastingToken({
       secret: TRACKER_SECRET,
       nodeId,
@@ -993,6 +1151,7 @@ async function handleApi(req, res, url) {
       ttlSec: asOptionalInteger(body.ttl_sec ?? body.ttlSec, 15 * 60),
       userPublicKey: userPublicKey || null,
       nodePublicKey: nodePublicKey || null,
+      cryptoMode,
     });
     recordIpTokenUsage(ipRate);
     await appendTokenUsage({
@@ -1017,8 +1176,10 @@ async function handleApi(req, res, url) {
       rate_limit: ipRate,
       node: publicNode(nodes.get(nodeId), computeRarityScores().get(nodeId) ?? 0),
       caveat: issued.payload.crypto_mode === 'public-key'
-        ? 'Public-key POC mode: prompt is encrypted for node key and response is encrypted for user key. Tracker still signs and transports public keys.'
-        : 'Legacy POC token carries a session secret for local E2E testing. Prefer user_public_key + node_public_key public-key mode.',
+        ? 'subtext mode (public-key): prompt is encrypted for node key and response is encrypted for user key. Tracker still signs and transports public keys.'
+        : issued.payload.crypto_mode === 'session-secret'
+          ? 'Legacy subtext mode (session-secret): kept for backwards compatibility. Prefer public-key subtext or plain mode.'
+          : 'plain mode (default baseline): OpenAI-compatible chat completions with real SSE. Privacy relies on TLS and the proxy not logging plaintext. Do not send secrets.',
     }, corsHeaders());
     return;
   }
@@ -1067,6 +1228,32 @@ async function handleApi(req, res, url) {
     const expected = nodePublicKeyFingerprint(node);
     const result = await verifyFingerprintUrl({ expected, url: fingerprintUrl });
     json(res, 200, { schema_version: 1, node_id: nodeId, url: fingerprintUrl, ...result }, corsHeaders());
+    return;
+  }
+
+  if (url.pathname === '/api/replay/timing' && req.method === 'POST') {
+    let raw;
+    try {
+      raw = await readJsonBody(req, TIMING_MAX_BYTES);
+    } catch (error) {
+      json(res, error?.statusCode ?? 400, { error: String(error?.message ?? error) }, corsHeaders());
+      return;
+    }
+    let sample;
+    try {
+      sample = validateTimingPayload(raw);
+    } catch (error) {
+      json(res, error?.statusCode ?? 400, { error: String(error?.message ?? error) }, corsHeaders());
+      return;
+    }
+    await appendTimingSample(sample);
+    json(res, 201, {
+      ok: true,
+      schema_version: 1,
+      node_id: sample.node_id,
+      stored_at: sample.stored_at,
+      community_timing: getCommunityTiming(sample.node_id),
+    }, corsHeaders());
     return;
   }
 
@@ -1142,6 +1329,7 @@ async function main() {
   await loadRegistry();
   await loadMetrics();
   await loadTokenUsage();
+  await loadTiming();
   setInterval(() => { pruneTokenUsageMap(); pruneIpUsageMap(); }, 60 * 60 * 1000).unref();
   await probeAllNodes();
   setInterval(() => {
@@ -1169,6 +1357,7 @@ async function main() {
 export {
   METRICS_PATH,
   TOKEN_USAGE_PATH,
+  TIMING_PATH,
   DB_PATH,
   REGISTRY_PATH,
   computeNodeContributionScores,
@@ -1188,6 +1377,11 @@ export {
   listPublicNodes,
   loadMetrics,
   loadTokenUsage,
+  loadTiming,
+  appendTimingSample,
+  validateTimingPayload,
+  getCommunityTiming,
+  timingByNode,
   loadRegistry,
   normalizeNode,
   probeAllNodes,

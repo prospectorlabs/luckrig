@@ -59,14 +59,15 @@ luckrigのプライバシー設計は「頑張らなければ見えない」で�
 
 ### 2.3 POC上の暗号モード
 
-現在のPOCには2つの経路があります。ブラウザ試食もnode public keyがある場合はpublic-key modeを使います。
+現在のPOCには3つのモードがあります。**plain mode が基線**で、ブラウザ試食のデフォルトもこれです。subtext系は任意の追加レイヤーです。
 
 | 経路 | 用途 | 状態 |
 | --- | --- | --- |
+| plain mode | OpenAI互換 / 真SSE / 素のOpenAIクライアントで動く。token発行時 `crypto_mode` 未指定なら自動でこれ | 実装済み・デフォルト |
 | public-key mode | Node/CLI E2Eおよびブラウザ試食。node public key / user public keyを使う | 実装済み |
 | legacy session-secret mode | node public keyがない古いノード向けfallback | 実装済み・後方互換扱い |
 
-public-key modeを前提にし、UIではfingerprint表示・コピー・URL照合を任意の自己検証として提供します。さらに強い運用をする場合は、GitHub等の別経路でfingerprintを公開してください。
+plain mode はTLS + ノードプロキシのログ非書き出し規約に依存します。subtext (public-key) はその上に「ノードのプロキシログに covertext しか残らない」defense-in-depth を足します。UI ではfingerprint表示・コピー・URL照合を任意の自己検証として提供します。さらに強い運用をする場合は、GitHub等の別経路でfingerprintを公開してください。
 
 ---
 
@@ -368,7 +369,21 @@ node src/cli/luckrig.js register \
 
 ## 11. tokenを発行する
 
-### 11.1 public-key mode
+### 11.1 plain mode（基線・デフォルト）
+
+`crypto_mode` を指定しない、または `plain` を指定すると plain mode の token が発行されます。OpenAI互換クライアントがそのまま動きます。
+
+```bash
+node src/cli/luckrig.js token \
+  --tracker http://127.0.0.1:8787 \
+  --node-id first-5090-qwen3 \
+  --user-id alice \
+  --contribution-score 1
+```
+
+`crypto_mode: "plain"` がレスポンスに含まれ、`session_secret` も `user_public_key_fingerprint` もありません。tokenは Bearer として `Authorization` ヘッダにそのまま使えます。
+
+### 11.2 public-key mode（subtext / opt-in）
 
 ```bash
 node src/cli/luckrig.js token \
@@ -393,19 +408,20 @@ node src/cli/luckrig.js token \
 }
 ```
 
-### 11.2 legacy session-secret mode
+### 11.3 legacy session-secret mode
 
-`user_public_key` を渡さない場合、後方互換のsession-secret modeになります。
+`user_public_key` を渡さず、明示的に `crypto_mode: session-secret` を指定したときだけ session-secret modeになります（後方互換のみ）。
 
 ```bash
 node src/cli/luckrig.js token \
   --tracker http://127.0.0.1:8787 \
   --node-id first-5090-qwen3 \
   --user-id browser-poc \
-  --contribution-score 0
+  --contribution-score 0 \
+  --crypto-mode session-secret
 ```
 
-node public keyがないノードではこのmodeにfallbackします。通常はpublic-key modeを使ってください。
+通常は plain mode を使い、ノードのプロキシログにcovertextしか残さない強い defense-in-depth が欲しいときだけ public-key (subtext) mode を選んでください。
 
 ---
 
@@ -455,6 +471,7 @@ http://127.0.0.1:8787/
 | proxy URL | 通常は `http://127.0.0.1:8788/v1` |
 | user id | 任意。例: `browser-poc` |
 | contribution score | `0`ならlimited、`1`以上ならcontributor |
+| mode | `plain` (基線・真SSE) または `public-key` (subtext / 擬似SSE) |
 | prompt | 試したいprompt |
 | privacy caveat checkbox | 必須。機密情報を送らないことを確認 |
 
@@ -468,6 +485,9 @@ token取得 → 試食
 
 - responseが画面に表示される
 - replay JSON download linkが出る
+- 「このリグのタイミングを共有する (opt-in)」ボタンが活性化する
+
+このボタンを押すと、プロンプト/レスポンス本文を送らずに、tok/s・TTFT・キュー待ち等のタイミング数値だけが `POST /api/replay/timing` でトラッカーへ送られます。集計値は `GET /api/nodes` の `community_timing` として公開ノードリストに反映されます。送らない選択肢のままでも何も起きません（デフォルトは送信しない）。
 
 ![tasting panel展開状態と試食結果 (SVGモックアップ)](./docs/images/tasting-panel.svg)
 

@@ -249,6 +249,80 @@ function parseSseText(text) {
   return { events, encryptedContent, chunk_timestamps };
 }
 
+function parsePlainSseText(text) {
+  const events = [];
+  let content = '';
+  const chunk_timestamps = [];
+  let timing = null;
+  for (const line of String(text).split(/\r?\n/)) {
+    if (!line.startsWith('data: ')) continue;
+    const data = line.slice('data: '.length).trim();
+    if (!data || data === '[DONE]') continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      continue;
+    }
+    events.push(parsed);
+    if (parsed?.object === 'luckrig.timing') {
+      timing = parsed;
+      continue;
+    }
+    const piece = parsed?.choices?.[0]?.delta?.content;
+    if (typeof piece === 'string' && piece.length > 0) {
+      content += piece;
+      chunk_timestamps.push(Date.now());
+    }
+  }
+  return { events, content, chunk_timestamps, timing };
+}
+
+function buildPlainReplayRecordBrowser({ prompt, content, timing, chunk_timestamps = [], ttft_ms = null, node_id, model_name }) {
+  const tokenEstimate = estimateTokens(content, { modelName: model_name });
+  const outputTokens = tokenEstimate.tokens;
+  const generationSec = Number(timing?.generation_sec ?? 0);
+  const tokPerSec = generationSec > 0 ? Number((outputTokens / generationSec).toFixed(3)) : null;
+  return {
+    schema_version: 1,
+    created_at: new Date().toISOString(),
+    prompt,
+    response: content,
+    node_id: timing?.node_id ?? node_id,
+    queue_wait_sec: timing?.queue_wait_sec ?? 0,
+    generation_sec: generationSec,
+    tok_per_sec: tokPerSec,
+    output_tokens: outputTokens,
+    tokenizer: tokenEstimate.tokenizer,
+    tokenizer_model_family: tokenEstimate.model_family,
+    ttft_ms: timing?.proxy_ttft_ms ?? ttft_ms,
+    network_ttft_ms: ttft_ms,
+    proxy_ttft_ms: timing?.proxy_ttft_ms ?? null,
+    chunk_timestamps,
+    limited_output_truncated: timing?.limited_output_truncated ?? false,
+  };
+}
+
+function timingPayloadFromReplayBrowser(record, { node_id, mode = 'plain', user_id = 'browser-poc' } = {}) {
+  return {
+    schema_version: 1,
+    node_id: node_id ?? record.node_id,
+    mode,
+    user_id,
+    created_at: record.created_at,
+    tok_per_sec: record.tok_per_sec,
+    ttft_ms: record.ttft_ms ?? null,
+    proxy_ttft_ms: record.proxy_ttft_ms ?? null,
+    network_ttft_ms: record.network_ttft_ms ?? null,
+    generation_sec: record.generation_sec ?? null,
+    queue_wait_sec: record.queue_wait_sec ?? null,
+    output_tokens: record.output_tokens ?? null,
+    tokenizer: record.tokenizer ?? null,
+    tokenizer_model_family: record.tokenizer_model_family ?? null,
+    limited_output_truncated: record.limited_output_truncated === true,
+  };
+}
+
 function tokenizerFamily(modelName = '') {
   const name = String(modelName).toLowerCase();
   if (name.includes('qwen')) return 'qwen';
@@ -308,12 +382,24 @@ async function runBrowserTasting(node, fragment) {
   const userId = fragment.querySelector('.tasting-user-id').value.trim() || 'browser-poc';
   const contributionScore = Number(fragment.querySelector('.tasting-score').value || 0);
   const fingerprintConfirm = fragment.querySelector('.fingerprint-confirm').value.trim();
+  const selectedMode = fragment.querySelector('.tasting-mode')?.value || 'plain';
   const hasNodePublicKey = Boolean(node.node_public_key && node.node_public_key_fingerprint);
+  const wantSubtext = selectedMode === 'public-key';
+  const uploadButton = fragment.querySelector('.upload-timing');
+  const uploadStatus = fragment.querySelector('.timing-upload-status');
+  if (uploadButton) {
+    uploadButton.disabled = true;
+    uploadButton.dataset.timingPayload = '';
+    if (uploadStatus) uploadStatus.textContent = '';
+  }
 
   output.hidden = true;
   download.hidden = true;
   if (!trust.checked) throw new Error('privacy caveat checkbox is required');
-  if (hasNodePublicKey && fingerprintConfirm && fingerprintConfirm !== node.node_public_key_fingerprint) {
+  if (wantSubtext && !hasNodePublicKey) {
+    throw new Error('subtext mode requires a node public key; this node has none, fall back to plain');
+  }
+  if (wantSubtext && fingerprintConfirm && fingerprintConfirm !== node.node_public_key_fingerprint) {
     throw new Error('node public key fingerprint confirmation does not match');
   }
   if (!prompt) throw new Error('prompt is required');
@@ -321,10 +407,7 @@ async function runBrowserTasting(node, fragment) {
 
   status.textContent = 'preparing browser identity...';
   const identity = await getBrowserIdentity();
-  let browserKeys = null;
-  if (hasNodePublicKey) {
-    browserKeys = identity;
-  }
+  const browserKeys = wantSubtext ? identity : null;
 
   status.textContent = 'requesting token...';
   const tokenRequest = {
@@ -332,6 +415,7 @@ async function runBrowserTasting(node, fragment) {
     user_id: userId || identity.userId,
     contribution_score: contributionScore,
     ttl_sec: 300,
+    crypto_mode: wantSubtext ? 'public-key' : 'plain',
     ...(browserKeys ? { user_public_key: browserKeys.publicKeyPem, node_public_key: node.node_public_key } : {}),
   };
   const tokenRes = await fetch('/api/tokens', {
@@ -342,17 +426,29 @@ async function runBrowserTasting(node, fragment) {
   const tokenPayload = await tokenRes.json();
   if (!tokenRes.ok) throw new Error(tokenPayload.error ?? `token HTTP ${tokenRes.status}`);
 
+  const issuedMode = tokenPayload.crypto_mode;
   status.textContent = 'preparing prompt...';
-  const encryptedPrompt = tokenPayload.crypto_mode === 'public-key'
-    ? await encryptJsonToSubtextPublicKeyBrowser({ prompt }, { publicKeyPem: tokenPayload.node_public_key })
-    : await encryptJsonToSubtextBrowser({ prompt }, { sessionSecret: tokenPayload.session_secret });
-  const chatBody = {
-    model: node.model_name || 'luckrig-browser-poc',
-    stream: true,
-    messages: [{ role: 'user', content: encryptedPrompt }],
-  };
+  let chatBody;
+  if (issuedMode === 'plain') {
+    chatBody = {
+      model: node.model_name || 'luckrig-browser-poc',
+      stream: true,
+      messages: [{ role: 'user', content: prompt }],
+    };
+  } else {
+    const encryptedPrompt = issuedMode === 'public-key'
+      ? await encryptJsonToSubtextPublicKeyBrowser({ prompt }, { publicKeyPem: tokenPayload.node_public_key })
+      : await encryptJsonToSubtextBrowser({ prompt }, { sessionSecret: tokenPayload.session_secret });
+    chatBody = {
+      model: node.model_name || 'luckrig-browser-poc',
+      stream: true,
+      messages: [{ role: 'user', content: encryptedPrompt }],
+    };
+  }
 
-  status.textContent = 'waiting for proxy / pseudo SSE...';
+  status.textContent = issuedMode === 'plain'
+    ? 'waiting for proxy / real SSE...'
+    : 'waiting for proxy / pseudo SSE...';
   const started = performance.now();
   const proxyRes = await fetch(`${proxyUrl}/chat/completions`, {
     method: 'POST',
@@ -366,11 +462,25 @@ async function runBrowserTasting(node, fragment) {
   if (!proxyRes.ok) throw new Error(sseText || `proxy HTTP ${proxyRes.status}`);
 
   status.textContent = 'preparing response...';
-  const { encryptedContent, chunk_timestamps } = parseSseText(sseText);
-  const envelope = tokenPayload.crypto_mode === 'public-key'
-    ? await decryptJsonFromSubtextPublicKeyBrowser(encryptedContent, { privateKey: browserKeys.privateKey })
-    : await decryptJsonFromSubtextBrowser(encryptedContent, { sessionSecret: tokenPayload.session_secret });
-  const replay = buildReplayRecordBrowser(envelope, { chunk_timestamps, ttft_ms: Math.round(performance.now() - started) });
+  let replay;
+  if (issuedMode === 'plain') {
+    const { content, chunk_timestamps, timing } = parsePlainSseText(sseText);
+    replay = buildPlainReplayRecordBrowser({
+      prompt,
+      content,
+      timing,
+      chunk_timestamps,
+      ttft_ms: Math.round(performance.now() - started),
+      node_id: node.id,
+      model_name: chatBody.model,
+    });
+  } else {
+    const { encryptedContent, chunk_timestamps } = parseSseText(sseText);
+    const envelope = issuedMode === 'public-key'
+      ? await decryptJsonFromSubtextPublicKeyBrowser(encryptedContent, { privateKey: browserKeys.privateKey })
+      : await decryptJsonFromSubtextBrowser(encryptedContent, { sessionSecret: tokenPayload.session_secret });
+    replay = buildReplayRecordBrowser(envelope, { chunk_timestamps, ttft_ms: Math.round(performance.now() - started) });
+  }
 
   output.hidden = false;
   output.textContent = replay.response;
@@ -381,6 +491,17 @@ async function runBrowserTasting(node, fragment) {
   download.hidden = false;
   download.textContent = `download replay JSON (${download.download})`;
   status.textContent = `done: ${replay.tok_per_sec ?? '—'} tok/s, truncated=${replay.limited_output_truncated}`;
+
+  if (uploadButton) {
+    const timingPayload = timingPayloadFromReplayBrowser(replay, {
+      node_id: node.id,
+      mode: issuedMode,
+      user_id: userId || identity.userId,
+    });
+    uploadButton.dataset.timingPayload = JSON.stringify(timingPayload);
+    uploadButton.disabled = false;
+    if (uploadStatus) uploadStatus.textContent = 'ready (本文は送られません)';
+  }
 }
 
 
@@ -516,6 +637,18 @@ function renderNode(node) {
     <span>note ${contribution.components.note_score}</span>
   ` : '';
 
+  const ct = node.community_timing;
+  const communityEl = fragment.querySelector('.community-timing');
+  if (communityEl) {
+    if (ct && ct.samples_count > 0) {
+      const tps = ct.tok_per_sec_p50 != null ? `${Number(ct.tok_per_sec_p50).toFixed(1)} tok/s p50` : 'tok/s p50 —';
+      const ttft = ct.ttft_ms_p50 != null ? `${Math.round(ct.ttft_ms_p50)} ms p50` : 'TTFT p50 —';
+      communityEl.innerHTML = `<strong>community ${tps}</strong><span>${ttft}</span><span>n=${ct.samples_count}</span>`;
+    } else {
+      communityEl.innerHTML = `<span class="community-timing-empty">community tok/s なし（誰かが opt-in でタイミングを共有すると表示されます）</span>`;
+    }
+  }
+
   const tags = fragment.querySelector('.tags');
   tags.replaceChildren(...node.tags.map((tag) => {
     const span = document.createElement('span');
@@ -608,6 +741,40 @@ function renderNode(node) {
       runButton.disabled = false;
     }
   });
+
+  const uploadBtn = fragment.querySelector('.upload-timing');
+  const uploadStat = fragment.querySelector('.timing-upload-status');
+  if (uploadBtn) {
+    uploadBtn.addEventListener('click', async () => {
+      const raw = uploadBtn.dataset.timingPayload;
+      if (!raw) {
+        if (uploadStat) uploadStat.textContent = 'no replay to share yet';
+        return;
+      }
+      uploadBtn.disabled = true;
+      if (uploadStat) uploadStat.textContent = 'uploading timing (no body)...';
+      try {
+        const payload = JSON.parse(raw);
+        const res = await fetch('/api/replay/timing', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+        const ct = json.community_timing;
+        if (uploadStat) uploadStat.textContent = ct
+          ? `shared. community p50 = ${ct.tok_per_sec_p50?.toFixed?.(1) ?? '—'} tok/s (n=${ct.samples_count})`
+          : 'shared';
+        // Refresh node list so the card reflects the new aggregate.
+        loadNodes().catch(() => {});
+      } catch (error) {
+        if (uploadStat) uploadStat.textContent = `upload error: ${error.message}`;
+      } finally {
+        uploadBtn.disabled = false;
+      }
+    });
+  }
 
   return fragment;
 }

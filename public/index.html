@@ -71,6 +71,7 @@
         <p class="note"></p>
         <div class="showcase-badges"></div>
         <div class="contribution-panel"></div>
+        <div class="community-timing"></div>
         <div class="tags"></div>
         <details class="fingerprint-panel">
           <summary class="fingerprint-title">任意のnode public key fingerprint自己検証</summary>
@@ -94,6 +95,13 @@
             <label>
               <span>contribution score</span>
               <input class="tasting-score" type="number" min="0" step="1" value="0" />
+            </label>
+            <label>
+              <span>mode</span>
+              <select class="tasting-mode">
+                <option value="plain" selected>plain (基線 / 真SSE / OpenAI互換)</option>
+                <option value="public-key">subtext (任意 / 擬似SSE / ログにcovertext)</option>
+              </select>
             </label>
           </div>
           <label class="prompt-label fingerprint-url-label">
@@ -122,6 +130,13 @@
           </div>
           <pre class="tasting-output" hidden></pre>
           <a class="replay-download" hidden download>download replay JSON</a>
+          <div class="timing-upload-actions">
+            <button class="upload-timing" type="button" disabled>このリグのタイミングを共有する (opt-in)</button>
+            <span class="timing-upload-status"></span>
+          </div>
+          <p class="timing-upload-help">
+            プロンプトとレスポンス本文は送信されません。tok/s・TTFT・キュー待ちなどのタイミング数値だけがトラッカーへ送られ、公開ノードリストの community_timing として p50 が集計されます。
+          </p>
         </details>
         <footer class="health"></footer>
         <footer class="observations"></footer>

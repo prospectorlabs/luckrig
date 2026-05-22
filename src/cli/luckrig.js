@@ -29,7 +29,7 @@ function usage() {
 
 Usage:
   luckrig register --tracker http://127.0.0.1:8787 --endpoint-url http://127.0.0.1:8788/v1 --model-name qwen --quantization Q4_K_M --gpu RTX_5090 [--node-public-key PEM] [--dry-run]
-  luckrig token --tracker http://127.0.0.1:8787 --node-id first-5090-qwen3 [--user-id alice] [--contribution-score 1] [--user-public-key PEM]
+  luckrig token --tracker http://127.0.0.1:8787 --node-id first-5090-qwen3 [--user-id alice] [--contribution-score 1] [--crypto-mode plain|public-key|session-secret] [--user-public-key PEM]
   luckrig proxy --node-id first-5090-qwen3 [--port 8788] [--upstream-url http://127.0.0.1:8088/v1] [--node-private-key PEM]
   luckrig keygen [--out-prefix node]
 
@@ -92,6 +92,7 @@ export function buildTokenRequest(args) {
     user_id: args.userId ?? 'anonymous',
     contribution_score: args.contributionScore ? Number(args.contributionScore) : 0,
     ttl_sec: args.ttlSec ? Number(args.ttlSec) : undefined,
+    crypto_mode: args.cryptoMode,
     user_public_key: args.userPublicKey,
     node_public_key: args.nodePublicKey,
   };

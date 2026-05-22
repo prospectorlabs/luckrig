@@ -15,6 +15,12 @@ const { processChatCompletion } = await import('../src/proxy/server.js');
 const { buildEncryptedChatBody, replayFromProxyResult } = await import('../src/client/tasting.js');
 const { loadReplayRecord, saveReplayRecord } = await import('../src/client/replay.js');
 const {
+  parsePlainSseChunks,
+  replayFromPlainSseChunks,
+  timingPayloadFromReplay,
+} = await import('../src/client/replay.js');
+const { buildPlainChatBody } = await import('../src/client/tasting.js');
+const {
   decryptJsonFromSubtext,
   decryptJsonFromSubtextWithPrivateKey,
   encryptJsonToSubtext,
@@ -196,7 +202,7 @@ async function main() {
     method: 'POST',
     url: '/api/tokens',
     headers: { 'content-type': 'application/json' },
-    body: { node_id: node.id, user_id: 'limited-e2e', contribution_score: 0, ttl_sec: 60 },
+    body: { node_id: node.id, user_id: 'limited-e2e', contribution_score: 0, ttl_sec: 60, crypto_mode: 'session-secret' },
   });
   assert.equal(limitedTokenResponse.statusCode, 201, limitedTokenResponse.text);
   assert.equal(limitedTokenResponse.json.contribution.tier, 'limited');
@@ -314,6 +320,102 @@ async function main() {
   const removed = tracker.pruneTokenUsageMap({ now: new Date('2026-05-22T00:00:00.000Z') });
   assert.equal(removed >= 1, true);
   assert.equal(tracker.tokenUsageDaily.has('1970-01-01::limited::old-user'), false);
+
+  // ----- plain mode (baseline) E2E -----
+
+  const plainTokenResponse = await requestTracker({
+    method: 'POST',
+    url: '/api/tokens',
+    headers: { 'content-type': 'application/json' },
+    body: { node_id: node.id, user_id: 'plain-e2e', contribution_score: 1, ttl_sec: 60 },
+  });
+  assert.equal(plainTokenResponse.statusCode, 201, plainTokenResponse.text);
+  assert.equal(plainTokenResponse.json.crypto_mode, 'plain', 'default mode without keys must be plain');
+  assert.equal(plainTokenResponse.json.session_secret, null);
+  assert.match(plainTokenResponse.json.caveat, /plain mode/);
+
+  const plainPrompt = 'hello luckrig plain mode';
+  const plainBody = buildPlainChatBody({ prompt: plainPrompt, stream: true });
+  // Vanilla OpenAI-shaped body: messages[].content is plaintext.
+  assert.equal(plainBody.messages[0].content, plainPrompt);
+  const plainProxyResult = await processChatCompletion({
+    body: plainBody,
+    authHeader: `Bearer ${plainTokenResponse.json.token}`,
+    nodeId: node.id,
+    trackerSecret: process.env.LUCKRIG_TRACKER_SECRET,
+  });
+  assert.equal(plainProxyResult.kind, 'plain-sse', 'plain mode must stream real SSE chunks, not pseudo-SSE');
+  assert.ok(plainProxyResult.chunks.length >= 3, 'plain mode SSE must produce multiple chunks');
+  assert.ok(plainProxyResult.chunks.join('').includes('[DONE]'));
+  // Plaintext must NOT be subtext-encoded in plain mode.
+  assert.equal(hasSubtext(plainProxyResult.chunks.join('')), false);
+
+  const { content: plainContent, timing: plainTiming, chunk_timestamps: plainStamps } = parsePlainSseChunks(plainProxyResult.chunks);
+  assert.equal(plainContent, `mock:${plainPrompt}`);
+  assert.ok(plainTiming && plainTiming.object === 'luckrig.timing');
+  assert.equal(plainTiming.crypto_mode, 'plain');
+  assert.ok(plainStamps.length >= 1);
+
+  const plainReplay = replayFromPlainSseChunks(plainProxyResult.chunks, {
+    prompt: plainPrompt,
+    node_id: node.id,
+    model_name: 'luckrig-plain-poc',
+    ttft_ms: 7,
+  });
+  assert.equal(plainReplay.schema_version, 1);
+  assert.equal(plainReplay.prompt, plainPrompt);
+  assert.equal(plainReplay.response, `mock:${plainPrompt}`);
+  assert.ok(plainReplay.output_tokens > 0);
+
+  // ----- opt-in timing upload (CONCEPT §opt-in timing metadata sharing) -----
+
+  const timingPayload = timingPayloadFromReplay(plainReplay, {
+    node_id: node.id,
+    mode: 'plain',
+    user_id: 'plain-e2e',
+  });
+  // The allowlist must hold: payload only carries timing fields, never prompt/response.
+  for (const key of Object.keys(timingPayload)) {
+    assert.equal(/(prompt|response|message|chunk_timestamp|content|envelope|body)/i.test(key), false, `timing payload must not include body-like field: ${key}`);
+  }
+
+  const timingResp = await requestTracker({
+    method: 'POST',
+    url: '/api/replay/timing',
+    headers: { 'content-type': 'application/json' },
+    body: timingPayload,
+  });
+  assert.equal(timingResp.statusCode, 201, timingResp.text);
+  assert.equal(timingResp.json.ok, true);
+  assert.equal(timingResp.json.node_id, node.id);
+  assert.ok(timingResp.json.community_timing.samples_count >= 1);
+
+  // Disallowed body fields must be rejected.
+  const leakyResp = await requestTracker({
+    method: 'POST',
+    url: '/api/replay/timing',
+    headers: { 'content-type': 'application/json' },
+    body: { ...timingPayload, prompt: 'should be rejected' },
+  });
+  assert.equal(leakyResp.statusCode, 400, leakyResp.text);
+  assert.match(leakyResp.json.error, /disallowed field/);
+
+  // Unknown fields must also be rejected.
+  const unknownResp = await requestTracker({
+    method: 'POST',
+    url: '/api/replay/timing',
+    headers: { 'content-type': 'application/json' },
+    body: { ...timingPayload, totally_unknown: 1 },
+  });
+  assert.equal(unknownResp.statusCode, 400, unknownResp.text);
+  assert.match(unknownResp.json.error, /unknown field/);
+
+  // Aggregated tok/s must surface in the public node list now that we have a sample.
+  const nodesAfter = await requestTracker({ method: 'GET', url: '/api/nodes' });
+  const nodeAfter = nodesAfter.json.nodes.find((n) => n.id === node.id);
+  assert.ok(nodeAfter, 'node must be in public list');
+  assert.ok(nodeAfter.community_timing, 'public node must expose community_timing');
+  assert.equal(nodeAfter.community_timing.samples_count >= 1, true);
 
   console.log('[e2e] ok');
   console.log(`[e2e] node=${node.id}`);

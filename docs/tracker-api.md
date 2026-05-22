@@ -2,7 +2,7 @@
 
 このAPIは、CONCEPT.md §「最小実装の順序」に沿ったv1/POC trackerです。無登録者向け公開リスト、死活監視、health/telemetry履歴、token発行、SQLite永続化、limited quotaを担当します。
 
-このAPIはprompt/response本文を保存しません。tok/s / TTFTはtracker health metricsではなく、replay側のchunk timestampを一次ソースにします。現在はtoken、public-key handoff、fingerprint、SQLite永続化、limited quota、prompt filterまで実装済みです。
+このAPIはprompt/response本文を保存しません。tok/s / TTFTはtracker health metricsではなく、replay側のchunk timestampやノードプロキシ計測値を一次ソースにします。さらに利用者が明示的にopt-inしたタイミングメタデータのみ `POST /api/replay/timing` で受け付け、ノード単位でp50集計します（§/api/replay/timing 参照）。現在はtoken、public-key handoff、fingerprint、SQLite永続化、limited quota、prompt filter、opt-in timing集計まで実装済みです。
 
 ## 起動
 
@@ -26,6 +26,7 @@ LUCKRIG_DEV=1 npm run dev
 | `LUCKRIG_REGISTRY_PATH` | `data/nodes.seed.json` | ノードregistry JSON |
 | `LUCKRIG_METRICS_PATH` | `data/metrics.jsonl` | health/telemetry JSONL mirror（runtime生成、git管理外） |
 | `LUCKRIG_TOKEN_USAGE_PATH` | `data/token-usage.jsonl` | token usage JSONL mirror（runtime生成、git管理外） |
+| `LUCKRIG_TIMING_PATH` | `data/timing.jsonl` | opt-in timing JSONL mirror（runtime生成、git管理外） |
 | `LUCKRIG_DB_PATH` | `data/luckrig.sqlite` | SQLite DB（runtime生成、git管理外） |
 | `LUCKRIG_USE_SQLITE` | enabled | `0`でSQLiteを無効化 |
 | `LUCKRIG_LIMITED_TOKENS_PER_DAY` | `5` | limited tierの1日あたりtoken発行上限 |
@@ -137,12 +138,22 @@ trackerが自動生成したShowcaseカテゴリと該当ノードを返しま�
   "user_id": "alice",
   "contribution_score": 1,
   "ttl_sec": 900,
+  "crypto_mode": "plain",
   "user_public_key": "-----BEGIN PUBLIC KEY-----...",
   "node_public_key": "-----BEGIN PUBLIC KEY-----..."
 }
 ```
 
-レスポンスはBearer token、期限、`crypto_mode`、node public key、public key fingerprint、contribution tierを含みます。`user_public_key` を指定した場合はpublic-key modeになり、session secretは返りません。legacyとしてsession-secret modeも残っています。ブラウザ試食ではfingerprint表示・コピー・URL照合を任意の自己検証として提供します。
+レスポンスはBearer token、期限、`crypto_mode`、node public key、public key fingerprint、contribution tierを含みます。
+
+`crypto_mode` の決定ルール:
+
+- `user_public_key` を指定 → `public-key`（subtext mode / X25519+AES-GCM）
+- `crypto_mode: "plain"` を指定 → `plain`（OpenAI互換の基線）
+- `crypto_mode: "session-secret"` を指定 → `session-secret`（legacy subtext mode、後方互換のみ）
+- 何も指定なし → `plain`（基線がデフォルト）
+
+ブラウザ試食ではfingerprint表示・コピー・URL照合を任意の自己検証として提供します。
 
 ### `GET /api/contribution/:user_id?score=1`
 
@@ -158,6 +169,44 @@ node public key fingerprintを別経路URLから取得して照合します。
   "url": "https://example.com/luckrig-fingerprint.txt"
 }
 ```
+
+### `POST /api/replay/timing`
+
+リプレイの**タイミングメタデータのみ**をトラッカーに送るopt-inエンドポイントです。デフォルトでは試食UIから送信されません。利用者が明示的にUI上の「公開タイミングを共有する」ボタンを押した場合のみ呼ばれます。
+
+受け付けるフィールドは厳格な許可リストのみで、`prompt` / `response` / `messages` / `chunk_timestamps` などの本文系は混入してもサーバが拒否します。
+
+```json
+{
+  "schema_version": 1,
+  "node_id": "first-5090-qwen3",
+  "mode": "plain",
+  "user_id": "alice",
+  "created_at": "2026-05-22T07:12:34.000Z",
+  "tok_per_sec": 267.0,
+  "ttft_ms": 842,
+  "proxy_ttft_ms": 712,
+  "network_ttft_ms": 842,
+  "generation_sec": 8.3,
+  "queue_wait_sec": 12.1,
+  "output_tokens": 2215,
+  "tokenizer": "luckrig-heuristic-v1",
+  "tokenizer_model_family": "qwen"
+}
+```
+
+レスポンス:
+
+```json
+{
+  "ok": true,
+  "schema_version": 1,
+  "node_id": "first-5090-qwen3",
+  "stored_at": "2026-05-22T07:12:34.500Z"
+}
+```
+
+受信したサンプルは `data/timing.jsonl` に append-only で記録し、ノード単位の p50 を集計します。`GET /api/nodes` の各ノードに `community_timing` として `samples_count` / `tok_per_sec_p50` / `ttft_ms_p50` / `last_uploaded_at` を含めて返します。
 
 レスポンス:
 
@@ -223,4 +272,4 @@ curl -X POST http://127.0.0.1:8787/api/nodes \
 - `health_url` がJSONを返す場合はmemory/gpu/engine/queue等をbest-effortで正規化し、`data/metrics.jsonl` に追記する
 - この段階の `rarity_score` は公開リストの初期ソート用の簡易値。CONCEPT.mdの貢献スコアとは別物
 - ノードが落ちてもペナルティなし。`unavailable` 表示になるだけ
-- tok/sはここでは測らない。Step 2以降もノード自己申告ではなく、利用者側chunk timestamp由来に寄せる
+- tok/sはここでは測らない。集計値は opt-in `POST /api/replay/timing` 経由のサンプルから算出する。ノード自己申告は一次ソースとして使わない。
