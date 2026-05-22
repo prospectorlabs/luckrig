@@ -1,5 +1,7 @@
 # luckrig — プロダクトコンセプト（草稿 v5）
 
+**日本語** | [English](./CONCEPT.en.md)
+
 ---
 
 ## 一言で言うと
