@@ -17,6 +17,11 @@ async function main() {
 
   const rpi = nodes.find((node) => node.id === 'showcase-rpi5-llama32-1b');
   if (!rpi) throw new Error('expected Raspberry Pi showcase seed node');
+  const keyedNode = nodes.find((node) => node.node_public_key_fingerprint);
+  if (!keyedNode) throw new Error('expected at least one seed node with public key fingerprint');
+  if (!keyedNode.node_public_key_fingerprint.startsWith('sha256:')) {
+    throw new Error(`invalid fingerprint: ${keyedNode.node_public_key_fingerprint}`);
+  }
   if (nodes[0].rarity_score < nodes.at(-1).rarity_score) {
     throw new Error('node list is not sorted by rarity score descending');
   }
@@ -38,6 +43,9 @@ async function main() {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   if (!html.includes('luckrig tracker prototype')) {
     throw new Error('index page did not include expected marker');
+  }
+  if (!html.includes('node public key fingerprint')) {
+    throw new Error('index page did not include fingerprint UI marker');
   }
 
   console.log('[smoke] ok');

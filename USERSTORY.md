@@ -549,7 +549,9 @@ Acceptance criteria:
 Current evidence:
 
 - Fingerprint generation implemented
-- UI confirmation pending
+- Public node cards display/copy fingerprint when present
+- Trust notice tells users to verify out-of-band before tasting
+- Full affirmative confirmation gate before browser tasting is pending
 
 #### US-10.2 — Persist production data durably
 
@@ -672,15 +674,15 @@ Success indicators:
 - US-7.2 Replay generation timing schema
 - US-8.1 Initial Showcase visibility
 - US-8.2 Tuning notes in node list
+- US-10.1 Public key fingerprint display/copy in UI
 
 ### Next recommended stories
 
-1. **US-10.1 Verify public key fingerprints in UI**
-2. **Browser tasting flow for Journey C**
-3. **US-9.1 UI trust/disclaimer gate**
-4. **US-10.3 Real quota enforcement**
-5. **US-9.2 Prompt filtering**
-6. **US-10.2 Durable DB migration**
+1. **Browser tasting flow for Journey C**
+2. **US-9.1 UI trust/disclaimer gate**
+3. **US-10.3 Real quota enforcement**
+4. **US-9.2 Prompt filtering**
+5. **US-10.2 Durable DB migration**
 
 ---
 

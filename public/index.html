@@ -29,9 +29,10 @@
     </header>
 
     <main>
-      <section class="notice">
-        <strong>v1 scope:</strong> テキスト生成のみ。tok/sやTTFTの本計測、キューUX、subtext、リプレイは後続ステップ。
-        この画面はまず「公開リスト + 死活監視」を立ち上げるためのものです。
+      <section class="notice trust-notice">
+        <strong>trust model:</strong> luckrigは「頑張らなければ見えない」ための実験的な設計です。
+        通常のログやtcpdumpに平文を残さないことを目指しますが、ノード提供者がプロセス内部に踏み込めばプロンプト/出力を見られます。
+        試食前にはnode public key fingerprintを別経路で確認してください。
       </section>
 
       <section class="summary" id="summary" aria-live="polite"></section>
@@ -56,6 +57,14 @@
         <p class="availability"></p>
         <p class="note"></p>
         <div class="tags"></div>
+        <section class="fingerprint-panel">
+          <div class="fingerprint-title">node public key fingerprint</div>
+          <code class="fingerprint-value"></code>
+          <div class="fingerprint-actions">
+            <button class="copy-fingerprint" type="button">copy fingerprint</button>
+            <span class="fingerprint-help"></span>
+          </div>
+        </section>
         <footer class="health"></footer>
         <footer class="observations"></footer>
       </article>

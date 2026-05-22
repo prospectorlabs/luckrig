@@ -27,6 +27,24 @@ function formatDate(value) {
   }
 }
 
+
+async function copyText(text) {
+  if (!text || text === '—') return false;
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.append(textarea);
+  textarea.select();
+  const ok = document.execCommand('copy');
+  textarea.remove();
+  return ok;
+}
+
 function renderSummary(nodes) {
   const counts = nodes.reduce((acc, node) => {
     acc[node.health.status] = (acc[node.health.status] ?? 0) + 1;
@@ -69,6 +87,32 @@ function renderNode(node) {
     span.textContent = tag;
     return span;
   }));
+
+  const fingerprint = node.node_public_key_fingerprint || '—';
+  const fingerprintPanel = fragment.querySelector('.fingerprint-panel');
+  const fingerprintValue = fragment.querySelector('.fingerprint-value');
+  const fingerprintHelp = fragment.querySelector('.fingerprint-help');
+  const copyButton = fragment.querySelector('.copy-fingerprint');
+  fingerprintValue.textContent = fingerprint;
+  if (fingerprint === '—') {
+    fingerprintPanel.dataset.state = 'missing';
+    fingerprintHelp.textContent = 'public-key tasting unavailable until this node registers a key';
+    copyButton.disabled = true;
+  } else {
+    fingerprintPanel.dataset.state = 'present';
+    fingerprintHelp.textContent = 'verify out-of-band before tasting';
+    copyButton.addEventListener('click', async () => {
+      const original = copyButton.textContent;
+      try {
+        await copyText(fingerprint);
+        copyButton.textContent = 'copied';
+      } catch {
+        copyButton.textContent = 'copy failed';
+      } finally {
+        setTimeout(() => { copyButton.textContent = original; }, 1200);
+      }
+    });
+  }
 
   const health = node.health;
   fragment.querySelector('.health').innerHTML = `

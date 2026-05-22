@@ -36,7 +36,7 @@ button, select {
 }
 button { cursor: pointer; }
 button:hover { border-color: var(--accent); }
-button:disabled { opacity: .65; cursor: wait; }
+button:disabled { opacity: .65; cursor: not-allowed; }
 .filter { display: inline-flex; gap: 8px; align-items: center; color: var(--muted); }
 
 .notice {
@@ -88,4 +88,52 @@ dd { margin: 4px 0 0; font-weight: 650; overflow-wrap: anywhere; }
 @media (max-width: 720px) {
   .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .specs { grid-template-columns: 1fr; }
+}
+
+.trust-notice {
+  border-color: color-mix(in srgb, var(--warn) 35%, var(--line));
+}
+.fingerprint-panel {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255,255,255,.03);
+}
+.fingerprint-panel[data-state="present"] {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+.fingerprint-panel[data-state="missing"] {
+  border-style: dashed;
+}
+.fingerprint-title {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.fingerprint-value {
+  display: block;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(0,0,0,.25);
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.fingerprint-panel[data-state="missing"] .fingerprint-value { color: var(--muted); }
+.fingerprint-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+.copy-fingerprint {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.fingerprint-help {
+  color: var(--muted);
+  font-size: 12px;
 }
