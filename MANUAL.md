@@ -102,6 +102,8 @@ source .tools/git-env.sh
 
 ## 5. 全体構成
 
+![luckrigの全体構成図 (SVGモックアップ)](./docs/images/architecture.svg)
+
 ```text
 Browser UI / client
   ↓ GET /api/nodes, POST /api/tokens
@@ -402,6 +404,8 @@ node src/cli/luckrig.js token \
 
 ## 12. ブラウザで試食する
 
+![公開リスト + node card + fingerprint表示 (SVGモックアップ)](./docs/images/overview.svg)
+
 ### 12.1 起動するもの
 
 1. tracker
@@ -429,6 +433,8 @@ node src/proxy/server.js
 
 ブラウザで開きます。
 
+公開リストはデフォルトでscarcity/Showcase順に並びます。
+
 ```text
 http://127.0.0.1:8787/
 ```
@@ -455,6 +461,8 @@ token取得 → 暗号化 → 試食
 
 - responseが画面に表示される
 - replay JSON download linkが出る
+
+![tasting panel展開状態と試食結果 (SVGモックアップ)](./docs/images/tasting-panel.svg)
 
 ### 12.3 limited tierの挙動
 
@@ -638,6 +646,9 @@ POCとしては一通り動きますが、本番化には以下が必要です�
 
 ## 19. 最短確認手順
 
+![CLIによる起動・登録・テスト flow (SVGモックアップ)](./docs/images/cli-flow.svg)
+
+
 mock upstreamで最短確認する場合:
 
 ```bash
@@ -672,4 +683,38 @@ CLI/Node E2Eで確認する場合:
 ```bash
 npm test
 ```
+
+
+---
+
+## 20. スクリーンショットについて
+
+この文書に埋め込まれている図は、現サンドボックスでブラウザを起動できないため、`public/styles.css` の実カラーから生成した **SVGモックアップ** です（写真ではありません）。
+
+実際のスクリーンショットを撮りたい場合は、通常のローカルshellで以下のように行ってください。
+
+### macOSの例
+
+```bash
+LUCKRIG_DEV=1 LUCKRIG_TRACKER_SECRET=dev-secret npm start &
+node src/proxy/server.js &
+open http://127.0.0.1:8787/
+# Cmd+Shift+4 で範囲選択スクリーンショット
+```
+
+### Linux + Chrome headless 例
+
+```bash
+LUCKRIG_DEV=1 LUCKRIG_TRACKER_SECRET=dev-secret npm start &
+node src/proxy/server.js &
+google-chrome \
+  --headless=new \
+  --no-sandbox \
+  --hide-scrollbars \
+  --window-size=1280,1600 \
+  --screenshot=docs/images/overview.png \
+  http://127.0.0.1:8787/
+```
+
+撮影後は `docs/images/*.svg` を `docs/images/*.png` に置き換え、本マニュアル内のリンク先も差し替えてください。SVGモックアップと現UIに乖離がないかも併せて確認してください。
 

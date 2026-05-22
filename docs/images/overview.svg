@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 760" font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b2735"/>
+      <stop offset="1" stop-color="#090a0f"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#171a25"/>
+      <stop offset="1" stop-color="#11131c"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="760" fill="url(#bg)"/>
+
+  <!-- Hero -->
+  <g transform="translate(80,60)">
+    <text x="0" y="0" fill="#c6ff6b" font-size="12" font-weight="700" letter-spacing="1.6">LUCKRIG TRACKER PROTOTYPE</text>
+    <text x="0" y="48" fill="#f5f7fb" font-size="40" font-weight="700">今この瞬間、誰かのリグで動いているLLM推論API</text>
+    <text x="0" y="92" fill="#a3a9b8" font-size="16">OpenAI互換APIを喋るオンプレミスノードの公開リスト。SLAなし、保証なし。</text>
+    <text x="0" y="116" fill="#a3a9b8" font-size="16">ただし、どんな構成が今動いているかを見えるようにする。</text>
+    <!-- buttons -->
+    <g transform="translate(0,148)">
+      <rect width="74" height="36" rx="18" fill="#11131c" stroke="#2a2f3f"/>
+      <text x="37" y="23" fill="#f5f7fb" font-size="14" text-anchor="middle">更新</text>
+      <g transform="translate(96,0)">
+        <rect width="160" height="36" rx="18" fill="#11131c" stroke="#2a2f3f"/>
+        <text x="14" y="23" fill="#a3a9b8" font-size="13">status</text>
+        <text x="58" y="23" fill="#f5f7fb" font-size="13">all ▾</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- Notice -->
+  <g transform="translate(80,272)">
+    <rect width="1120" height="76" rx="18" fill="#0f1320" stroke="#5a4a1f"/>
+    <text x="20" y="30" fill="#f5f7fb" font-size="14" font-weight="700">trust model:</text>
+    <text x="118" y="30" fill="#a3a9b8" font-size="14">luckrigは「頑張らなければ見えない」ための実験的な設計です。</text>
+    <text x="20" y="54" fill="#a3a9b8" font-size="14">通常のログやtcpdumpに平文を残さないことを目指しますが、ノード提供者がプロセス内部に踏み込めばプロンプト/出力を見られます。</text>
+  </g>
+
+  <!-- Summary -->
+  <g transform="translate(80,372)">
+    <g>
+      <rect width="266" height="68" rx="16" fill="#11131c" stroke="#2a2f3f"/>
+      <text x="16" y="36" fill="#f5f7fb" font-size="26" font-weight="700">3</text>
+      <text x="16" y="56" fill="#a3a9b8" font-size="12">listed nodes</text>
+    </g>
+    <g transform="translate(284,0)">
+      <rect width="266" height="68" rx="16" fill="#11131c" stroke="#2a2f3f"/>
+      <text x="16" y="36" fill="#65d487" font-size="26" font-weight="700">1</text>
+      <text x="16" y="56" fill="#a3a9b8" font-size="12">available</text>
+    </g>
+    <g transform="translate(568,0)">
+      <rect width="266" height="68" rx="16" fill="#11131c" stroke="#2a2f3f"/>
+      <text x="16" y="36" fill="#ff6b7a" font-size="26" font-weight="700">2</text>
+      <text x="16" y="56" fill="#a3a9b8" font-size="12">unavailable</text>
+    </g>
+    <g transform="translate(852,0)">
+      <rect width="268" height="68" rx="16" fill="#11131c" stroke="#2a2f3f"/>
+      <text x="16" y="36" fill="#ffce5c" font-size="26" font-weight="700">0</text>
+      <text x="16" y="56" fill="#a3a9b8" font-size="12">unknown</text>
+    </g>
+  </g>
+
+  <!-- node cards -->
+  <g transform="translate(80,472)">
+    <g>
+      <rect width="362" height="248" rx="22" fill="url(#card)" stroke="#2a2f3f"/>
+      <g transform="translate(18,18)">
+        <rect width="92" height="24" rx="12" fill="#0a0a0a" stroke="#3d6a4a"/>
+        <text x="46" y="16" fill="#65d487" font-size="11" text-anchor="middle">available</text>
+        <g transform="translate(238,0)">
+          <rect width="100" height="24" rx="12" fill="#0a0a0a" stroke="#2a2f3f"/>
+          <text x="50" y="16" fill="#a3a9b8" font-size="11" text-anchor="middle">scarcity 1.00</text>
+        </g>
+        <text x="0" y="56" fill="#f5f7fb" font-size="18" font-weight="700">初号5090 / Qwen3-35B-A3B</text>
+        <g transform="translate(0,72)" font-size="11">
+          <rect width="158" height="46" rx="10" fill="#1c1f2c"/>
+          <text x="10" y="20" fill="#a3a9b8">model</text>
+          <text x="10" y="38" fill="#f5f7fb" font-weight="700">Qwen3-35B-A3B</text>
+          <rect x="170" width="158" height="46" rx="10" fill="#1c1f2c"/>
+          <text x="180" y="20" fill="#a3a9b8">quant</text>
+          <text x="180" y="38" fill="#f5f7fb" font-weight="700">Q4_K_XL</text>
+          <rect y="54" width="158" height="46" rx="10" fill="#1c1f2c"/>
+          <text x="10" y="74" fill="#a3a9b8">GPU</text>
+          <text x="10" y="92" fill="#f5f7fb" font-weight="700">RTX 5090</text>
+          <rect x="170" y="54" width="158" height="46" rx="10" fill="#1c1f2c"/>
+          <text x="180" y="74" fill="#a3a9b8">ctx</text>
+          <text x="180" y="92" fill="#f5f7fb" font-weight="700">65536</text>
+        </g>
+        <text x="0" y="186" fill="#d5dae7" font-size="11">MTP n_max=2が最速。長文RAGはSPEC=none推奨。</text>
+        <g transform="translate(0,196)">
+          <rect width="320" height="38" rx="10" fill="rgba(0,0,0,.25)" stroke="#3d4f2a"/>
+          <text x="10" y="16" fill="#a3a9b8" font-size="10">node public key fingerprint</text>
+          <text x="10" y="32" fill="#c6ff6b" font-family="ui-monospace, monospace" font-size="10">sha256:aZuK8JLDYROmCqe8y7_gianXYuAgdIUabuGpFa72aWc</text>
+        </g>
+      </g>
+    </g>
+
+    <g transform="translate(382,0)">
+      <rect width="362" height="248" rx="22" fill="url(#card)" stroke="#2a2f3f"/>
+      <g transform="translate(18,18)">
+        <rect width="100" height="24" rx="12" fill="#0a0a0a" stroke="#5a3a3f"/>
+        <text x="50" y="16" fill="#ff6b7a" font-size="11" text-anchor="middle">unavailable</text>
+        <g transform="translate(230,0)">
+          <rect width="108" height="24" rx="12" fill="#0a0a0a" stroke="#2a2f3f"/>
+          <text x="54" y="16" fill="#a3a9b8" font-size="11" text-anchor="middle">scarcity 1.20</text>
+        </g>
+        <text x="0" y="56" fill="#f5f7fb" font-size="18" font-weight="700">Showcase / Raspberry Pi 5</text>
+        <g transform="translate(0,72)" font-size="11">
+          <rect width="158" height="46" rx="10" fill="#1c1f2c"/>
+          <text x="10" y="20" fill="#a3a9b8">model</text>
+          <text x="10" y="38" fill="#f5f7fb" font-weight="700">llama3.2-1B</text>
+          <rect x="170" width="158" height="46" rx="10" fill="#1c1f2c"/>
+          <text x="180" y="20" fill="#a3a9b8">quant</text>
+          <text x="180" y="38" fill="#f5f7fb" font-weight="700">Q4_K_M</text>
+          <rect y="54" width="158" height="46" rx="10" fill="#1c1f2c"/>
+          <text x="10" y="74" fill="#a3a9b8">GPU</text>
+          <text x="10" y="92" fill="#f5f7fb" font-weight="700">Raspberry Pi 5</text>
+          <rect x="170" y="54" width="158" height="46" rx="10" fill="#1c1f2c"/>
+          <text x="180" y="74" fill="#a3a9b8">VRAM</text>
+          <text x="180" y="92" fill="#f5f7fb" font-weight="700">shared / CPU</text>
+        </g>
+        <g transform="translate(0,196)">
+          <rect width="320" height="38" rx="10" fill="rgba(0,0,0,.18)" stroke="#2a2f3f" stroke-dasharray="3 3"/>
+          <text x="10" y="16" fill="#a3a9b8" font-size="10">node public key fingerprint</text>
+          <text x="10" y="32" fill="#a3a9b8" font-family="ui-monospace, monospace" font-size="10">— (public-key tasting unavailable)</text>
+        </g>
+      </g>
+    </g>
+
+    <g transform="translate(764,0)">
+      <rect width="356" height="248" rx="22" fill="url(#card)" stroke="#2a2f3f"/>
+      <g transform="translate(18,18)">
+        <rect width="100" height="24" rx="12" fill="#0a0a0a" stroke="#5a3a3f"/>
+        <text x="50" y="16" fill="#ff6b7a" font-size="11" text-anchor="middle">unavailable</text>
+        <g transform="translate(226,0)">
+          <rect width="104" height="24" rx="12" fill="#0a0a0a" stroke="#2a2f3f"/>
+          <text x="52" y="16" fill="#a3a9b8" font-size="11" text-anchor="middle">scarcity 1.15</text>
+        </g>
+        <text x="0" y="56" fill="#f5f7fb" font-size="18" font-weight="700">Showcase / M3 Max unified</text>
+        <g transform="translate(0,72)" font-size="11">
+          <rect width="156" height="46" rx="10" fill="#1c1f2c"/>
+          <text x="10" y="20" fill="#a3a9b8">model</text>
+          <text x="10" y="38" fill="#f5f7fb" font-weight="700">Qwen2.5-14B</text>
+          <rect x="168" width="152" height="46" rx="10" fill="#1c1f2c"/>
+          <text x="178" y="20" fill="#a3a9b8">quant</text>
+          <text x="178" y="38" fill="#f5f7fb" font-weight="700">Q5_K_M</text>
+          <rect y="54" width="156" height="46" rx="10" fill="#1c1f2c"/>
+          <text x="10" y="74" fill="#a3a9b8">GPU</text>
+          <text x="10" y="92" fill="#f5f7fb" font-weight="700">Apple M3 Max</text>
+          <rect x="168" y="54" width="152" height="46" rx="10" fill="#1c1f2c"/>
+          <text x="178" y="74" fill="#a3a9b8">ctx</text>
+          <text x="178" y="92" fill="#f5f7fb" font-weight="700">32768</text>
+        </g>
+        <text x="0" y="186" fill="#d5dae7" font-size="11">ユニファイドメモリ構成の参考枠。</text>
+      </g>
+    </g>
+  </g>
+</svg>
